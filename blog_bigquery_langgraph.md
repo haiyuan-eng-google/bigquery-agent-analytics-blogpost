@@ -202,28 +202,34 @@ responses = await asyncio.gather(*tasks)
 
 ## What gets logged?
 
-After running the agent, BigQuery contains a full execution trace:
+After running the agent, BigQuery contains a full execution trace. Here's real output from our travel assistant querying weather, currency, flights, and time simultaneously:
 
-| Timestamp | Event Type | Tool | Latency |
-|-----------|-----------|------|---------|
-| 19:57:23 | `GRAPH_START` | — | — |
-| 19:57:23 | `NODE_STARTING` | — | — |
-| 19:57:23 | `LLM_REQUEST` | — | — |
-| 19:57:28 | `LLM_RESPONSE` | — | 4,357ms |
-| 19:57:28 | `NODE_COMPLETED` | — | 4,366ms |
-| 19:57:28 | `TOOL_STARTING` | get_weather | — |
-| 19:57:28 | `TOOL_COMPLETED` | get_weather | <1ms |
-| 19:57:28 | `TOOL_STARTING` | convert_currency | — |
-| 19:57:28 | `TOOL_COMPLETED` | convert_currency | <1ms |
-| 19:57:28 | `TOOL_STARTING` | get_current_time | — |
-| 19:57:28 | `TOOL_COMPLETED` | get_current_time | <1ms |
-| 19:57:28 | `LLM_REQUEST` | — | — |
-| 19:57:33 | `LLM_RESPONSE` | — | 5,084ms |
-| 19:57:33 | `GRAPH_END` | — | **9,465ms** |
+| Timestamp (UTC) | Event Type | Node | Tool | Latency |
+|-----------|-----------|------|------|---------|
+| 21:43:38 | `GRAPH_START` | — | — | — |
+| 21:43:38 | `NODE_STARTING` | agent | — | — |
+| 21:43:38 | `LLM_REQUEST` | — | — | — |
+| 21:43:48 | `LLM_RESPONSE` | — | — | 10,505ms |
+| 21:43:48 | `NODE_COMPLETED` | agent | — | 10,508ms |
+| 21:43:48 | `NODE_STARTING` | tools | — | — |
+| 21:43:48 | `TOOL_STARTING` | — | get_current_time | — |
+| 21:43:48 | `TOOL_STARTING` | — | get_weather | — |
+| 21:43:48 | `TOOL_STARTING` | — | convert_currency | — |
+| 21:43:48 | `TOOL_STARTING` | — | get_flight_info | — |
+| 21:43:48 | `NODE_COMPLETED` | tools | — | 4ms |
+| 21:43:48 | `NODE_STARTING` | agent | — | — |
+| 21:43:48 | `LLM_REQUEST` | — | — | — |
+| 21:43:49 | `LLM_RESPONSE` | — | — | 906ms |
+| 21:43:49 | `NODE_COMPLETED` | agent | — | 908ms |
+| 21:43:49 | `GRAPH_END` | — | — | **13,059ms** |
 
-Two LLM calls dominate latency (4.4s + 5.1s), while tools are sub-millisecond. You'd know exactly where to optimize.
+*Real data from a live run against Gemini 2.5 Flash on February 10, 2026.*
+
+The trace tells a clear story: the first LLM call (tool selection) took 10.5s — the bottleneck. All four tools executed in parallel in 4ms. The second LLM call (synthesis) took only 906ms. Total graph execution: 13.1s. If we needed to optimize, we'd focus on reducing the initial LLM reasoning time.
 
 Every event includes `trace_id` for correlation, `span_id`/`parent_span_id` for OpenTelemetry-compatible tracing, `latency_ms`, `content` (for token estimation), and `attributes` (node name, tool name, graph name).
+
+Across a day of testing (11 sessions, 24 LLM calls, 23 tool invocations), the handler logged 141 events with an average graph latency of **9,987ms** (p95: 45,359ms) and an estimated cost of **$0.0032** for the `travel_assistant` agent.
 
 ---
 
