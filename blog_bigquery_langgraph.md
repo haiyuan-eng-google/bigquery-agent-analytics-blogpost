@@ -204,32 +204,34 @@ responses = await asyncio.gather(*tasks)
 
 After running the agent, BigQuery contains a full execution trace. Here's real output from our travel assistant querying weather, currency, flights, and time simultaneously:
 
-| Timestamp (UTC) | Event Type | Node | Tool | Latency |
-|-----------|-----------|------|------|---------|
-| 21:43:38 | `GRAPH_START` | — | — | — |
-| 21:43:38 | `NODE_STARTING` | agent | — | — |
-| 21:43:38 | `LLM_REQUEST` | — | — | — |
-| 21:43:48 | `LLM_RESPONSE` | — | — | 10,505ms |
-| 21:43:48 | `NODE_COMPLETED` | agent | — | 10,508ms |
-| 21:43:48 | `NODE_STARTING` | tools | — | — |
-| 21:43:48 | `TOOL_STARTING` | — | get_current_time | — |
-| 21:43:48 | `TOOL_STARTING` | — | get_weather | — |
-| 21:43:48 | `TOOL_STARTING` | — | convert_currency | — |
-| 21:43:48 | `TOOL_STARTING` | — | get_flight_info | — |
-| 21:43:48 | `NODE_COMPLETED` | tools | — | 4ms |
-| 21:43:48 | `NODE_STARTING` | agent | — | — |
-| 21:43:48 | `LLM_REQUEST` | — | — | — |
-| 21:43:49 | `LLM_RESPONSE` | — | — | 906ms |
-| 21:43:49 | `NODE_COMPLETED` | agent | — | 908ms |
-| 21:43:49 | `GRAPH_END` | — | — | **13,059ms** |
+| Timestamp (UTC) | Event Type | Node | Tool | Latency | Est. Tokens |
+|-----------|-----------|------|------|---------|-------------|
+| 21:43:38 | `GRAPH_START` | — | — | — | 25 |
+| 21:43:38 | `NODE_STARTING` | agent | — | — | 148 |
+| 21:43:38 | `LLM_REQUEST` | — | — | — | 120 |
+| 21:43:48 | `LLM_RESPONSE` | — | — | 10,505ms | 7 |
+| 21:43:48 | `NODE_COMPLETED` | agent | — | 10,508ms | 1,013 |
+| 21:43:48 | `NODE_STARTING` | tools | — | — | 1,146 |
+| 21:43:48 | `TOOL_STARTING` | — | get_current_time | — | 24 |
+| 21:43:48 | `TOOL_STARTING` | — | get_weather | — | 30 |
+| 21:43:48 | `TOOL_STARTING` | — | convert_currency | — | 55 |
+| 21:43:48 | `TOOL_STARTING` | — | get_flight_info | — | 49 |
+| 21:43:48 | `NODE_COMPLETED` | tools | — | 4ms | 397 |
+| 21:43:48 | `NODE_STARTING` | agent | — | — | 1,612 |
+| 21:43:48 | `LLM_REQUEST` | — | — | — | 1,028 |
+| 21:43:49 | `LLM_RESPONSE` | — | — | 906ms | 167 |
+| 21:43:49 | `NODE_COMPLETED` | agent | — | 908ms | 353 |
+| 21:43:49 | `GRAPH_END` | — | — | **13,059ms** | 25 |
 
-*Real data from a live run against Gemini 2.5 Flash on February 10, 2026.*
+*Real data from a live run against Gemini 2.5 Flash on February 10, 2026. Token estimates use the `CEIL(LENGTH(TO_JSON_STRING(content)) / 4)` approximation.*
 
-The trace tells a clear story: the first LLM call (tool selection) took 10.5s — the bottleneck. All four tools executed in parallel in 4ms. The second LLM call (synthesis) took only 906ms. Total graph execution: 13.1s. If we needed to optimize, we'd focus on reducing the initial LLM reasoning time.
+The trace tells a clear story: the first LLM call (tool selection) took 10.5s and consumed ~120 input tokens — the latency bottleneck. All four tools executed in parallel in 4ms. The second LLM call (synthesis) consumed ~1,028 input tokens (including tool results) but completed in only 906ms, producing ~167 output tokens. Total graph execution: 13.1s.
+
+Notice how token usage grows through the graph: the first `LLM_REQUEST` sends 120 tokens (just the user query), but the second sends 1,028 tokens (user query + all tool results). This is typical of ReAct agents — context accumulates with each cycle. Monitoring this growth helps you catch runaway token consumption before it hits your budget.
 
 Every event includes `trace_id` for correlation, `span_id`/`parent_span_id` for OpenTelemetry-compatible tracing, `latency_ms`, `content` (for token estimation), and `attributes` (node name, tool name, graph name).
 
-Across a day of testing (11 sessions, 24 LLM calls, 23 tool invocations), the handler logged 141 events with an average graph latency of **9,987ms** (p95: 45,359ms) and an estimated cost of **$0.0032** for the `travel_assistant` agent.
+Across a day of testing (11 sessions, 24 LLM calls, 23 tool invocations), the handler logged 141 events with an average graph latency of **9,987ms** (p95: 45,359ms) and an estimated token usage of **~10,716 input tokens** at **$0.0032** for the `travel_assistant` agent.
 
 ---
 
