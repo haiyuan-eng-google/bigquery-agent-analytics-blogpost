@@ -8,10 +8,10 @@ When you deploy an AI agent into production, the first question isn't *"does it 
 
 LLM-powered agents are probabilistic systems. They make decisions, call tools, and chain together operations in ways that are difficult to predict. Without observability, debugging a multi-step agent failure is like reading a novel with half the pages torn out.
 
-In this post, I'll walk you through building an async LangGraph agent with full observability powered by Google BigQuery. By the end, you'll have:
+In this post, I'll walk you through building a multimodal async LangGraph agent with full observability powered by Google BigQuery. By the end, you'll have:
 
-- A working multi-tool agent with every event logged to BigQuery in real time
-- SQL queries to analyze latency, token usage, tool errors, and cost
+- A working multimodal agent (text + images) with every event logged to BigQuery in real time
+- SQL queries to analyze latency, token usage, tool errors, multimodal content, and cost
 - BigQuery `AI.GENERATE()` for automated root cause analysis
 - Production-ready configuration patterns
 
@@ -49,43 +49,67 @@ pip install "langchain-google-community[bigquery]" langchain-google-genai langgr
 
 ## Step 1: Define tools
 
-We'll build a travel assistant with three tools. Clear docstrings help the LLM choose the right tool:
+We'll build a multimodal travel assistant that can analyze images of landmarks. Clear docstrings help the LLM choose the right tool:
 
 ```python
-from datetime import datetime
 from langchain_core.tools import tool
 
 
 @tool
-def get_current_time() -> str:
-    """Get the current date and time."""
-    now = datetime.now()
-    return f"Current time: {now.strftime('%I:%M:%S %p')} on {now.strftime('%B %d, %Y')}"
+def lookup_landmark(name: str) -> str:
+    """Look up information about a landmark or location.
 
-
-@tool
-def get_weather(city: str) -> str:
-    """Get the current weather for a city."""
-    weather_data = {
-        "tokyo": {"temp": 24, "condition": "Sunny", "humidity": 55},
-        "london": {"temp": 14, "condition": "Overcast", "humidity": 85},
+    Args:
+        name: The name of the landmark or location.
+    """
+    landmarks = {
+        "eiffel tower": (
+            "The Eiffel Tower is a wrought-iron lattice tower in Paris, France. "
+            "Built 1887-1889. Height: 330m. Visited by ~7 million people annually."
+        ),
+        "golden gate bridge": (
+            "The Golden Gate Bridge is a suspension bridge in San Francisco, CA. "
+            "Opened 1937. Span: 1,280m. Color: International Orange."
+        ),
+        "colosseum": (
+            "The Colosseum is an ancient amphitheatre in Rome, Italy. "
+            "Built 72-80 AD. Capacity: 50,000-80,000 spectators."
+        ),
     }
-    city_lower = city.lower().strip()
-    if city_lower in weather_data:
-        data = weather_data[city_lower]
-        return f"Weather in {city.title()}: {data['temp']}°C, {data['condition']}"
-    return f"Weather data for '{city}' not available."
+    name_lower = name.lower().strip()
+    for key, info in landmarks.items():
+        if key in name_lower or name_lower in key:
+            return info
+    return f"No information found for '{name}'."
 
 
 @tool
-def convert_currency(amount: float, from_currency: str, to_currency: str) -> str:
-    """Convert an amount from one currency to another."""
-    rates = {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "JPY": 0.0067}
-    from_curr, to_curr = from_currency.upper(), to_currency.upper()
-    if from_curr not in rates or to_curr not in rates:
-        return "Unknown currency"
-    result = amount * rates[from_curr] / rates[to_curr]
-    return f"{amount:,.2f} {from_curr} = {result:,.2f} {to_curr}"
+def get_travel_tips(destination: str) -> str:
+    """Get travel tips for a destination.
+
+    Args:
+        destination: The travel destination city or country.
+    """
+    tips = {
+        "paris": (
+            "Paris Travel Tips:\n"
+            "- Best time to visit: April-June or September-October\n"
+            "- Get a Paris Museum Pass for skip-the-line access\n"
+            "- The Metro is the fastest way to get around\n"
+            "- Tip: Visit the Eiffel Tower at sunset for the best views"
+        ),
+        "rome": (
+            "Rome Travel Tips:\n"
+            "- Book Colosseum tickets in advance to skip lines\n"
+            "- Dress modestly for Vatican/church visits\n"
+            "- Best gelato is found away from tourist areas"
+        ),
+    }
+    dest_lower = destination.lower().strip()
+    for key, info in tips.items():
+        if key in dest_lower or dest_lower in key:
+            return info
+    return f"No specific tips for '{destination}'."
 ```
 
 ---
@@ -103,6 +127,7 @@ from langchain_google_community.callbacks.bigquery_callback import (
 config = BigQueryLoggerConfig(
     batch_size=1,               # Write immediately (dev); use 50+ in production
     batch_flush_interval=0.5,
+    log_multi_modal_content=True,  # Log image/audio/video content parts
 )
 
 handler = AsyncBigQueryCallbackHandler(
@@ -110,12 +135,13 @@ handler = AsyncBigQueryCallbackHandler(
     dataset_id="agent_analytics",
     table_id="agent_events_v2",
     config=config,
-    graph_name="travel_assistant",  # Enables LangGraph-specific event tracking
+    graph_name="multimodal_travel_agent",  # Enables LangGraph-specific event tracking
 )
 ```
 
 Key points:
 - **`graph_name`** activates LangGraph integration — without it, you miss `NODE_STARTING`, `NODE_COMPLETED`, and graph-level tracking.
+- **`log_multi_modal_content`** enables the `content_parts` field, which logs each part of a multimodal message with its MIME type (`text/plain`, `image/jpeg`, etc.) and storage mode.
 - The handler is `asyncio`-native and safe for concurrent requests — each invocation gets its own trace via `ContextVar`.
 - The table is auto-created with date partitioning and clustering by `event_type`, `agent`, and `user_id`.
 
@@ -123,7 +149,7 @@ Key points:
 
 ## Step 3: Build the async agent
 
-Wire everything into an async LangGraph agent with a ReAct pattern:
+Wire everything into an async LangGraph agent with a ReAct pattern. Gemini 2.5 Flash handles both text and image inputs natively:
 
 ```python
 from typing import Annotated, TypedDict
@@ -138,7 +164,7 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
 
-tools = [get_current_time, get_weather, convert_currency]
+tools = [lookup_landmark, get_travel_tips]
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash", project="your-project-id"
 ).bind_tools(tools)
@@ -167,20 +193,28 @@ agent = workflow.compile()
 
 ## Step 4: Run with graph context tracking
 
-Wrap the invocation in `graph_context` to capture the full execution lifecycle:
+Wrap the invocation in `graph_context` to capture the full execution lifecycle. For multimodal input, pass images via `HumanMessage` with `image_url` content parts:
 
 ```python
 import asyncio
 
 metadata = {
-    "session_id": "session-001",
-    "user_id": "user-123",
-    "agent": "travel_assistant",
+    "session_id": "multimodal-session-001",
+    "user_id": "demo-user",
+    "agent": "multimodal_travel_agent",
 }
 
-async with handler.graph_context("travel_assistant", metadata=metadata):
+# Send an image alongside a text query
+multimodal_message = HumanMessage(
+    content=[
+        {"type": "text", "text": "What landmark is this? Look it up and give me travel tips."},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR..."}},
+    ]
+)
+
+async with handler.graph_context("multimodal_travel_agent", metadata=metadata):
     result = await agent.ainvoke(
-        {"messages": [HumanMessage(content="What's the weather in Tokyo?")]},
+        {"messages": [multimodal_message]},
         config={"callbacks": [handler], "metadata": metadata},
     )
 
@@ -188,12 +222,12 @@ print(result["messages"][-1].content)
 await handler.shutdown()  # Always shut down to flush remaining events
 ```
 
-The `graph_context` emits `GRAPH_START` on entry and `GRAPH_END` (or `GRAPH_ERROR`) on exit, with total latency measured. You can also run queries concurrently — each gets its own trace:
+The `graph_context` emits `GRAPH_START` on entry and `GRAPH_END` (or `GRAPH_ERROR`) on exit, with total latency measured. The image is automatically logged in `content_parts` with its MIME type. You can also run queries concurrently — each gets its own trace:
 
 ```python
 tasks = [
-    run_query("Weather in London?", "session-001"),
-    run_query("Convert 500 EUR to GBP", "session-002"),
+    run_query(text_message, "session-001"),
+    run_query(image_message, "session-002"),
 ]
 responses = await asyncio.gather(*tasks)
 ```
@@ -202,36 +236,39 @@ responses = await asyncio.gather(*tasks)
 
 ## What gets logged?
 
-After running the agent, BigQuery contains a full execution trace. Here's real output from our travel assistant querying weather, currency, flights, and time simultaneously:
+After running the agent, BigQuery contains a full execution trace. Here's real output from our multimodal travel agent — it received a PNG image of the Eiffel Tower, identified the landmark, called `lookup_landmark` and `get_travel_tips`, then synthesized a response:
 
-| Timestamp (UTC) | Event Type | Node | Tool | Latency | Est. Tokens |
-|-----------|-----------|------|------|---------|-------------|
-| 21:43:38 | `GRAPH_START` | — | — | — | 25 |
-| 21:43:38 | `NODE_STARTING` | agent | — | — | 148 |
-| 21:43:38 | `LLM_REQUEST` | — | — | — | 120 |
-| 21:43:48 | `LLM_RESPONSE` | — | — | 10,505ms | 7 |
-| 21:43:48 | `NODE_COMPLETED` | agent | — | 10,508ms | 1,013 |
-| 21:43:48 | `NODE_STARTING` | tools | — | — | 1,146 |
-| 21:43:48 | `TOOL_STARTING` | — | get_current_time | — | 24 |
-| 21:43:48 | `TOOL_STARTING` | — | get_weather | — | 30 |
-| 21:43:48 | `TOOL_STARTING` | — | convert_currency | — | 55 |
-| 21:43:48 | `TOOL_STARTING` | — | get_flight_info | — | 49 |
-| 21:43:48 | `NODE_COMPLETED` | tools | — | 4ms | 397 |
-| 21:43:48 | `NODE_STARTING` | agent | — | — | 1,612 |
-| 21:43:48 | `LLM_REQUEST` | — | — | — | 1,028 |
-| 21:43:49 | `LLM_RESPONSE` | — | — | 906ms | 167 |
-| 21:43:49 | `NODE_COMPLETED` | agent | — | 908ms | 353 |
-| 21:43:49 | `GRAPH_END` | — | — | **13,059ms** | 25 |
+| Timestamp (UTC) | Event Type | Tool | Latency | Content Parts | Est. Tokens |
+|-----------|-----------|------|---------|---------------|-------------|
+| 05:18:06 | `GRAPH_START` | — | — | 1 (text) | 29 |
+| 05:18:06 | `NODE_STARTING` | — | — | 1 | 1,154 |
+| 05:18:06 | `LLM_REQUEST` | — | — | **2 (text + image/jpeg)** | 611 |
+| 05:18:08 | `LLM_RESPONSE` | — | 2,517ms | 1 | 7 |
+| 05:18:08 | `NODE_COMPLETED` (agent) | — | 2,523ms | 1 | 814 |
+| 05:18:08 | `TOOL_STARTING` | lookup_landmark | — | 0 | 35 |
+| 05:18:08 | `TOOL_STARTING` | get_travel_tips | — | 0 | 39 |
+| 05:18:08 | `NODE_COMPLETED` (tools) | — | 4ms | 1 | 295 |
+| 05:18:08 | `LLM_REQUEST` | — | — | **5 (text + image + tool results)** | 1,315 |
+| 05:18:10 | `LLM_RESPONSE` | — | 1,692ms | 1 | 332 |
+| 05:18:10 | `NODE_COMPLETED` (agent) | — | 1,698ms | 1 | 785 |
+| 05:18:10 | `GRAPH_END` | — | **5,824ms** | 1 | 29 |
 
-*Real data from a live run against Gemini 2.5 Flash on February 10, 2026. Token estimates use the `CEIL(LENGTH(TO_JSON_STRING(content)) / 4)` approximation.*
+*Real data from a live multimodal run against Gemini 2.5 Flash on February 14, 2026. Token estimates use the `CEIL(LENGTH(TO_JSON_STRING(content)) / 4)` approximation.*
 
-The trace tells a clear story: the first LLM call (tool selection) took 10.5s and consumed ~120 input tokens — the latency bottleneck. All four tools executed in parallel in 4ms. The second LLM call (synthesis) consumed ~1,028 input tokens (including tool results) but completed in only 906ms, producing ~167 output tokens. Total graph execution: 13.1s.
+The trace tells a clear story: the first LLM call (image analysis + tool selection) took 2.5s with **2 content parts** — a text query and an `image/jpeg`. Both tools executed in parallel in 4ms. The second LLM call (synthesis) received **5 content parts** (original text + image + two tool results + AI tool call response) and completed in 1.7s. Total graph execution: 5.8s.
 
-Notice how token usage grows through the graph: the first `LLM_REQUEST` sends 120 tokens (just the user query), but the second sends 1,028 tokens (user query + all tool results). This is typical of ReAct agents — context accumulates with each cycle. Monitoring this growth helps you catch runaway token consumption before it hits your budget.
+The **Content Parts** column reveals what makes multimodal logging powerful. Each `LLM_REQUEST` breaks down into individual parts with MIME types:
 
-Every event includes `trace_id` for correlation, `span_id`/`parent_span_id` for OpenTelemetry-compatible tracing, `latency_ms`, `content` (for token estimation), and `attributes` (node name, tool name, graph name).
+| Part Index | MIME Type | Storage Mode | Text Preview |
+|-----------|-----------|------|---------|
+| 0 | `text/plain` | INLINE | "What landmark is shown in this image?..." |
+| 1 | `image/jpeg` | INLINE | [BASE64 IMAGE] |
 
-Across a day of testing (11 sessions, 24 LLM calls, 23 tool invocations), the handler logged 141 events with an average graph latency of **9,987ms** (p95: 45,359ms) and an estimated token usage of **~10,716 input tokens** at **$0.0032** for the `travel_assistant` agent.
+Without GCS configured, images are stored as `[BASE64 IMAGE]` placeholders. With GCS offloading enabled (`gcs_bucket_name`), images are uploaded to Cloud Storage and the `uri` field contains a `gs://` reference — keeping BigQuery rows lightweight while preserving full media access.
+
+Notice how token usage grows through the graph: the first `LLM_REQUEST` sends 611 tokens (user query + image), but the second sends 1,315 tokens (including tool results). This is typical of ReAct agents — context accumulates with each cycle. Monitoring this growth helps you catch runaway token consumption before it hits your budget.
+
+Every event includes `trace_id` for correlation, `span_id`/`parent_span_id` for OpenTelemetry-compatible tracing, `latency_ms`, `content` (for token estimation), `content_parts` (for multimodal detail), and `attributes` (node name, tool name, graph name).
 
 ---
 
@@ -291,6 +328,25 @@ WHERE event_type IN ('TOOL_COMPLETED', 'TOOL_ERROR')
 GROUP BY tool_name ORDER BY total_calls DESC;
 ```
 
+### Multimodal content analysis
+
+Find all events containing images and inspect their content parts:
+
+```sql
+SELECT
+    timestamp, event_type,
+    ARRAY_LENGTH(content_parts) AS num_parts,
+    (SELECT cp.mime_type FROM UNNEST(content_parts) cp
+     WHERE cp.mime_type LIKE 'image/%' LIMIT 1) AS image_type,
+    (SELECT cp.storage_mode FROM UNNEST(content_parts) cp
+     WHERE cp.mime_type LIKE 'image/%' LIMIT 1) AS storage_mode
+FROM `your-project.agent_analytics.agent_events_v2`
+WHERE EXISTS (
+    SELECT 1 FROM UNNEST(content_parts) cp WHERE cp.mime_type LIKE 'image/%'
+)
+ORDER BY timestamp DESC LIMIT 10;
+```
+
 ### Latency percentiles
 
 ```sql
@@ -334,7 +390,7 @@ FROM (
 ) LIMIT 5;
 ```
 
-This turns raw logs into actionable insights: *"The agent failed because `get_weather` was called with 'LA' — the tool only recognizes full city names like 'Los Angeles'. Update the tool description to clarify expected input format."*
+This turns raw logs into actionable insights: *"The agent failed because `lookup_landmark` was called with 'Tower' — the tool only recognizes full landmark names like 'Eiffel Tower'. Update the tool description to clarify expected input format."*
 
 You can also use [BigQuery Conversational Analytics](https://cloud.google.com/bigquery/docs/conversational-analytics) to ask questions in natural language — *"Show me error rates by agent this week"* — no SQL required.
 
@@ -364,85 +420,16 @@ config = BigQueryLoggerConfig(
 )
 ```
 
-**Multimodal agents** — log images, audio, and video alongside text:
+**Multimodal agents** — offload large media to GCS for production:
 
 ```python
 config = BigQueryLoggerConfig(
-    log_multi_modal_content=True,       # Enable content_parts with MIME types
-    gcs_bucket_name="my-agent-logs",    # Optional: offload large media to GCS
+    log_multi_modal_content=True,
+    gcs_bucket_name="my-agent-logs",    # Offload images/audio/video to GCS
     connection_id="us.my-bq-connection",
     max_content_length=500 * 1024,
 )
 ```
-
----
-
-## Bonus: Multimodal agent observability
-
-Modern agents don't just process text — they analyze images, interpret documents, and reason over mixed media. The callback handler captures multimodal content automatically, so you can track exactly what your agent *sees*.
-
-### Sending an image to a LangGraph agent
-
-Pass images via `HumanMessage` with `image_url` content parts:
-
-```python
-from langchain_core.messages import HumanMessage
-
-# Base64-encoded image
-multimodal_message = HumanMessage(
-    content=[
-        {"type": "text", "text": "What landmark is this? Look it up and give me travel tips."},
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR..."}},
-    ]
-)
-
-async with handler.graph_context("multimodal_agent", metadata=metadata):
-    result = await agent.ainvoke(
-        {"messages": [multimodal_message]},
-        config={"callbacks": [handler], "metadata": metadata},
-    )
-```
-
-### What gets logged for multimodal requests
-
-Here's the real trace from our multimodal travel agent — it received a PNG image of the Eiffel Tower, identified the landmark, and called two tools:
-
-| Timestamp | Event Type | Tool | Latency | Content Parts |
-|-----------|-----------|------|---------|---------------|
-| 05:18:06 | `GRAPH_START` | — | — | 1 (text) |
-| 05:18:06 | `LLM_REQUEST` | — | — | **2 (text + image/jpeg)** |
-| 05:18:08 | `LLM_RESPONSE` | — | 2,517ms | 1 (tool calls) |
-| 05:18:08 | `TOOL_STARTING` | lookup_landmark | — | 0 |
-| 05:18:08 | `TOOL_STARTING` | get_travel_tips | — | 0 |
-| 05:18:08 | `NODE_COMPLETED` (tools) | — | 4ms | 1 |
-| 05:18:08 | `LLM_REQUEST` | — | — | **5 (text + image + tool results)** |
-| 05:18:10 | `LLM_RESPONSE` | — | 1,692ms | 1 (final answer) |
-| 05:18:10 | `GRAPH_END` | — | **5,824ms** | 1 |
-
-*Real data from a live multimodal run. The agent identified the Eiffel Tower from a 200x150 PNG, looked up landmark facts, and returned travel tips — all in 5.8 seconds.*
-
-The key column is **Content Parts**: the first `LLM_REQUEST` has 2 parts (text query + image), while the second has 5 parts (original text + image + two tool results + AI response). Each part is logged with its MIME type and storage mode.
-
-### Querying multimodal content in BigQuery
-
-The `content_parts` field is a `REPEATED RECORD` with `mime_type`, `storage_mode`, `text`, and `uri` columns. Query it to find all image-containing events:
-
-```sql
-SELECT
-    timestamp, event_type,
-    ARRAY_LENGTH(content_parts) AS num_parts,
-    (SELECT cp.mime_type FROM UNNEST(content_parts) cp
-     WHERE cp.mime_type LIKE 'image/%' LIMIT 1) AS image_type,
-    (SELECT cp.storage_mode FROM UNNEST(content_parts) cp
-     WHERE cp.mime_type LIKE 'image/%' LIMIT 1) AS storage_mode
-FROM `your-project.agent_analytics.agent_events_v2`
-WHERE EXISTS (
-    SELECT 1 FROM UNNEST(content_parts) cp WHERE cp.mime_type LIKE 'image/%'
-)
-ORDER BY timestamp DESC LIMIT 10;
-```
-
-Without GCS configured, images are stored as `[BASE64 IMAGE]` placeholders with `INLINE` storage mode. With GCS offloading enabled (`gcs_bucket_name`), images are uploaded to Cloud Storage and the `uri` field contains a `gs://` reference — keeping BigQuery rows lightweight while preserving full media access.
 
 ---
 
