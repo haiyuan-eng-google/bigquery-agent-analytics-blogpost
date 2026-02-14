@@ -278,6 +278,75 @@ You can also build custom dashboards in Grafana, Metabase, or any BI tool that c
 
 ---
 
+## Analyze Your Agent Logs Conversationally — No SQL Required
+
+SQL queries and dashboards are great if you're comfortable writing them. But what if anyone on your team — product managers, support engineers, executives — could just *ask questions* about your agent's behavior in plain English?
+
+That's exactly what [BigQuery Conversational Analytics](https://cloud.google.com/blog/products/data-analytics/introducing-conversational-analytics-in-bigquery) enables. It lets you create a **data agent** that sits on top of your `agent_events_v2` table and answers questions in natural language — no SQL needed.
+
+Instead of writing:
+
+```sql
+SELECT agent, COUNT(*) AS errors
+FROM `my_project.my_dataset.agent_events_v2`
+WHERE status = 'ERROR' AND timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+GROUP BY agent ORDER BY errors DESC;
+```
+
+You just ask: *"Which agents had the most errors in the last 7 days?"*
+
+### How It Works
+
+BigQuery Conversational Analytics uses Gemini to interpret your natural language questions, generate SQL behind the scenes, execute it against your data, and return answers as text, charts, or tables — all within the BigQuery console.
+
+The key concept is a **data agent**: you point it at specific tables, give it context about what the data means, and it becomes an expert on your data. For agent analytics, this means creating a data agent that understands the `agent_events_v2` schema — what `event_type` values mean, how `session_id` groups conversations, what the `content` JSON contains, and so on.
+
+### Get Started: Use the Example Agent Configuration
+
+To make this easy, we've set up an example data agent pre-configured for the `agent_events_v2` schema. You can use it as a reference to create your own:
+
+**[View the example agent configuration in BigQuery Agents Hub](https://console.cloud.google.com/bigquery/agents_hub;agentsHubTab=Agents;agentsPath=%2Fbq%2Fagents%2Fagent_f86a22f0-390e-4476-9706-5072ba3da72a;chatPath=%2Fbq%2Fchat?project=test-project-0728-467323)**
+
+To create your own data agent for your analytics data:
+
+1. Open **BigQuery** in the Google Cloud Console
+2. Navigate to the **Agents Hub** tab
+3. Click **Create Agent**
+4. Add your `agent_events_v2` table as a knowledge source
+5. Add instructions that describe the schema in business terms, for example:
+   - *"`event_type` indicates the kind of event: `LLM_REQUEST` and `LLM_RESPONSE` are model interactions, `TOOL_STARTING` and `TOOL_COMPLETED` are tool calls, `INVOCATION_STARTING` and `INVOCATION_COMPLETED` bracket a full user turn."*
+   - *"`session_id` groups all events in a single conversation. `invocation_id` groups events within one turn."*
+   - *"The `content` field is JSON containing the actual prompt, response, or tool arguments."*
+6. Optionally add **verified queries** — pre-written SQL for common questions like "show me error rates by tool" or "what's the average latency this week"
+
+### Example Questions You Can Ask
+
+Once your data agent is set up, anyone on your team can open a chat and ask:
+
+- *"How many conversations happened today?"*
+- *"What's the error rate for the get_weather tool this week?"*
+- *"Show me the slowest LLM requests in the last 24 hours"*
+- *"Which users had the most interactions last month?"*
+- *"Compare token usage between last week and this week"*
+- *"Are there any anomalies in error rates over the past 30 days?"*
+
+The data agent generates and runs the SQL for you, returning results as tables or charts. It can even use BigQuery ML functions like `AI.FORECAST` and `AI.DETECT_ANOMALIES` for predictive analysis — all through natural language.
+
+### Why This Matters
+
+This closes the loop on agent observability. With BigQuery Agent Analytics + Conversational Analytics:
+
+| Persona | Before | After |
+|---|---|---|
+| **Developer** | Write SQL queries manually | Still can — but also chat |
+| **Product Manager** | Ask a developer to pull data | Self-serve: ask the data agent directly |
+| **Support Engineer** | Dig through logs for a session | Ask: *"Show me all events for session X"* |
+| **Executive** | Wait for weekly reports | Ask: *"How is agent usage trending this month?"* |
+
+You're not just logging agent data — you're making it accessible to everyone who needs it.
+
+---
+
 ## The Bigger Picture: Observability as a First-Class Concern
 
 Agent Starter Pack already gives you Cloud Trace telemetry out of the box. BigQuery Agent Analytics complements this by providing a **structured, queryable event store** designed for offline analysis:
