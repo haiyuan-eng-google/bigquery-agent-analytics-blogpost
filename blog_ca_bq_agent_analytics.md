@@ -12,8 +12,8 @@ What if I told you that BigQuery can handle the *entire* loop — from capturing
 
 In this post, I'll walk you through a **closed-loop integration** that connects two powerful BigQuery capabilities:
 
-1. **BigQuery Agent Analytics Plugin** — automatically logs every agent event (user messages, LLM calls, tool executions) into a BigQuery table
-2. **Conversational Analytics (CA)** — lets you query that same table using natural language, with the CA Data Agent writing SQL, returning results, and generating insights for you
+1. **[BigQuery Agent Analytics Plugin](https://google.github.io/adk-docs/integrations/bigquery-agent-analytics/)** — automatically logs every agent event (user messages, LLM calls, tool executions) into a BigQuery table
+2. **[Conversational Analytics (CA)](https://cloud.google.com/bigquery/docs/conversational-analytics)** — lets you query that same table using natural language, with the CA Data Agent writing SQL, returning results, and generating insights for you
 
 The result is a workflow that looks like this:
 
@@ -320,4 +320,10 @@ The core insight is simple: if your agent's telemetry lives in BigQuery, you get
 
 ---
 
-*The companion notebooks and full source code are available on [GitHub](https://github.com/haiyuan-eng-google/demo_BQ_agent_analytics_plugin_notebook). Conversational Analytics is currently in Preview — [learn more here](https://cloud.google.com/bigquery/docs/conversational-analytics).*
+## References
+
+- **BigQuery Agent Analytics Plugin** — [Official documentation](https://google.github.io/adk-docs/integrations/bigquery-agent-analytics/)
+- **Conversational Analytics** — [Official documentation](https://cloud.google.com/bigquery/docs/conversational-analytics)
+- **Companion notebook** — [NY_City_Bike_Agent_Logging.ipynb on GitHub](https://github.com/haiyuan-eng-google/demo_BQ_agent_analytics_plugin_notebook/blob/main/NY_City_Bike_Agent_Logging.ipynb)
+- **Agent Development Kit (ADK)** — [ADK documentation](https://google.github.io/adk-docs/)
+- **BigQuery ML AI functions** — [AI.GENERATE](https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-generate), [AI.CLASSIFY](https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-classify), [AI.DETECT_ANOMALIES](https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-detect-anomalies)
