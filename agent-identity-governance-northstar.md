@@ -2,7 +2,7 @@
 
 *v1 draft - Haiyuan Cao + [EM, BigQuery Conversational Analytics] - for co-author review*
 
-> **TL;DR.** The motivating enterprise user is a knowledge worker running a personalized, proactive agent - call it Jarvis - over their work surface. In our worked example, Jarvis is a Claude-class assistant (think Claude Code or a similar general-purpose business agent) with broad but bounded access to chat, docs, and **BigQuery Data Cloud**, and it may delegate natural-language data tasks to [BigQuery Conversational Analytics](https://docs.cloud.google.com/bigquery/docs/conversational-analytics). Even with a single agent per user, today's stack does not cleanly answer three questions: *what is this agent authorized to do right now, what did it actually do, and how much did it spend.* Our northstar: every agent action must be **attributed** to a stable agent identity plus per-turn attestation, **bounded** by a per-turn, instruction-aware policy, and **observable** as a structured event stream that also carries cost. [BigQuery Agent Analytics](https://adk.dev/integrations/bigquery-agent-analytics/) is the strongest concrete foundation for the observability and audit half of that loop; agent identity and per-turn policy are the gap to align on.
+> **TL;DR.** The motivating enterprise user is a knowledge worker running a personalized, proactive agent - call it Jarvis - over their work surface. In our worked example, Jarvis is a Claude-class assistant (think Claude Code or a similar general-purpose business agent) with broad but bounded access to chat, docs, and **BigQuery Data Cloud**, and it may delegate natural-language data tasks to [BigQuery Conversational Analytics](https://docs.cloud.google.com/bigquery/docs/conversational-analytics). Even with a single agent per user, today's stack does not cleanly answer three questions: *what is this agent authorized to do right now, what did it actually do, and how much did it spend.* Our northstar: every agent action must be **attributed** to a stable agent identity plus per-turn attestation, **bounded** by a per-turn, instruction-aware policy, and **observable** as a structured event stream that also supports cost attribution through joins to BigQuery billing data. [BigQuery Agent Analytics](https://adk.dev/integrations/bigquery-agent-analytics/) is the strongest concrete foundation for the observability and audit half of that loop **for ADK-based agents today**; non-ADK Jarvis agents (e.g., Claude Code-class) need equivalent export/adapters to land events on the same BigQuery audit substrate. Agent identity and per-turn policy are the remaining gap to align on.
 
 ---
 
@@ -83,7 +83,7 @@ Traditional audit logs capture API activity. For agents, the investigable record
 
 The cost line matters on its own. *"How much did the Jarvis fleet spend in BigQuery last week, by user, by dataset?"* is a first-order question for Finance and SRE, not a nice-to-have. Cost is also a leading indicator of misbehavior: a 100x spend spike is a useful injection-or-bug signal.
 
-Without this record, *"the agent did the wrong thing"* is very hard to investigate. You can see *that* a query ran. You cannot see *why the agent chose to run it*. [BigQuery Agent Analytics](https://adk.dev/integrations/bigquery-agent-analytics/) already captures structured ADK events into BigQuery with trace and span correlation; joined to `INFORMATION_SCHEMA.JOBS` it gives per-turn cost attribution out of the box. It does not solve identity and policy on its own, but it makes the observability and audit half of this northstar concretely available today.
+Without this record, *"the agent did the wrong thing"* is very hard to investigate. You can see *that* a query ran. You cannot see *why the agent chose to run it*. [BigQuery Agent Analytics](https://adk.dev/integrations/bigquery-agent-analytics/) provides the **event spine** for ADK-based agents today: structured events, trace/span correlation, and token usage. Per-turn *cost* attribution is not a native BQAA field — it comes from joining BQAA events to `INFORMATION_SCHEMA.JOBS`, Cloud Audit Logs, and BigQuery billing export. That join is straightforward for ADK agents; non-ADK Jarvis agents (e.g., a Claude Code-class assistant) need an equivalent exporter or adapter to land on the same substrate. BQAA does not solve identity and policy on its own, but it makes the observability and audit spine of this northstar concretely available for ADK agents today.
 
 ---
 
@@ -105,7 +105,7 @@ This separation matters because identities must stay stable even as the underlyi
 
 ### P2. Authority must be bounded by per-turn, instruction-aware policy
 
-IAM remains the **ceiling** - the maximum set of actions the principal may take. Agent-native policy operates as a **per-turn floor**, evaluating whether the specific instantiated call should proceed given the context of the request.
+IAM remains the **ceiling** — the maximum set of actions the principal may take. Agent-native policy operates as a **turn-level runtime bound inside that ceiling**: a tighter, context-dependent envelope that narrows what this specific turn may do. It never widens the ceiling; it only constrains within it, evaluating whether the specific instantiated call should proceed given the context of the request.
 
 Concrete sketch for freeform Jarvis over BigQuery:
 
@@ -115,7 +115,7 @@ Concrete sketch for freeform Jarvis over BigQuery:
 - Before each tool call, a policy evaluator checks: does the instantiated call fit the per-turn scope, the IAM ceiling, and the provenance rules (*no writes whose arguments originated from ingested content*)?
 - If the user then explicitly says *"actually, also write individual rows to my sandbox,"* the scope widens - but only because of user text, never because of ingested content.
 
-**How this differs from GCP IAM:** IAM is static and principal-based; the per-turn layer is dynamic, context-based, and includes instruction provenance, output channel, and cost bounds. It is additive to IAM, not a replacement - the ceiling keeps doing its job.
+**How this differs from GCP IAM:** IAM is static and principal-based and sets the ceiling; the per-turn layer is a dynamic, context-dependent runtime bound *underneath* that ceiling, factoring in instruction provenance, output channel, and cost envelope. It is additive to IAM, not a replacement — the ceiling keeps doing its job.
 
 This is the hardest design problem on the list. Making per-turn scope derivation cheap, conservative by default, and overridable only by explicit user text is where we expect most of the v1 design effort to land.
 
@@ -126,11 +126,11 @@ Observability for agents should be a structured event stream, not screenshots an
 - prompts and messages in, with provenance labels on ingested content
 - tool calls with arguments and results
 - generated SQL or structured call payloads
-- errors, latency, token usage
-- **cost**: bytes scanned, slot ms, downstream service cost
+- errors, latency, token usage (token usage is first-class in BQAA today)
+- **cost**: joined in from `INFORMATION_SCHEMA.JOBS` (bytes scanned, slot ms), BigQuery billing export, and downstream service cost — not a native BQAA field
 - stable agent identity + per-turn attestation + delegation chain
 
-In the reference architecture here, BigQuery is the system of record and [BigQuery Agent Analytics](https://adk.dev/integrations/bigquery-agent-analytics/) is the ingestion path for ADK-based agents. The foundational asset is not dashboards; it is the underlying joinable data - agent events joined to BigQuery job history and Cloud Audit Logs for complete lineage.
+In the reference architecture here, BigQuery is the system of record and [BigQuery Agent Analytics](https://adk.dev/integrations/bigquery-agent-analytics/) is the ingestion path **for ADK-based agents**. Non-ADK agents — e.g., a Claude Code-class Jarvis — need an equivalent exporter or adapter to land on the same substrate; closing that gap is one of the v1 asks in §5. The foundational asset is not dashboards; it is the underlying joinable data — agent events joined to BigQuery job history, Cloud Audit Logs, and billing for complete lineage and cost attribution.
 
 ### P4. Audit must be a product surface, and it should be agent-driven
 
@@ -159,7 +159,7 @@ The primary scenario is **single-agent**, not multi-agent:
 [ Governed BigQuery Data Cloud ]
         |
         v
-[ Event stream + cost attribution via BQ Agent Analytics ]
+[ Event spine (BQ Agent Analytics, ADK) + joined cost from JOBS/Audit/billing ]
         |
         v
 [ Audit, observability, cost analysis via SQL, BI, and CA ]
@@ -174,7 +174,7 @@ What we want each layer to do in the northstar, and how close today is:
 | Jarvis (or peer enterprise agent) | Present stable identity; emit per-turn attestation, structured events, and cost; enforce per-turn scope before each tool call | Partial. Telemetry emission exists; stable-identity-plus-attestation and per-turn scope enforcement are not standardized. |
 | BQ CA data agent (when delegated to) | Verify upstream delegation; be the natural policy choke point for NL-to-SQL requests; preserve user and agent context in generated SQL | Partial. Governed NL analytics over BigQuery is supported publicly; standardized delegated-identity verification and agent-aware policy are not yet described publicly. |
 | BigQuery Data Cloud | Enforce data-plane controls: IAM, policy tags, row- and column-level security, Cloud Audit Logs, job-level cost attribution | Available today at the data plane; not yet agent-aware at delegation semantics. |
-| BigQuery Agent Analytics | Capture detailed agent events into BigQuery with trace/span correlation, cost fields, joinable to `INFORMATION_SCHEMA.JOBS` and Cloud Audit Logs | Available today. Strongest concrete foundation in the stack. |
+| BigQuery Agent Analytics | Capture detailed agent events into BigQuery with trace/span correlation and token usage, joinable to `INFORMATION_SCHEMA.JOBS`, Cloud Audit Logs, and billing export for cost attribution | Available today **for ADK-based agents**. Strongest concrete foundation in the stack. Per-turn cost comes from joins, not a native BQAA field. Non-ADK Jarvis agents (e.g., Claude Code-class) need an equivalent exporter/adapter to land on this substrate. |
 | CA over the event log | Let platform, security, finance, and product teams interrogate agent activity in natural language | Available today by composing CA over the BQ AA event tables. This is the audit UX story. |
 
 The framing bet: **observability is here now; stable agent identity plus per-turn attestation, and per-turn instruction-aware policy, are the gaps to align on.**
@@ -183,7 +183,7 @@ The framing bet: **observability is here now; stable agent identity plus per-tur
 
 ## 5. What we likely need to build or influence
 
-1. **A standardized agent event schema.** Anchor on the BigQuery-native shape BQ Agent Analytics already provides; push toward alignment with OpenTelemetry GenAI conventions, with first-class fields for delegation chain, instruction provenance, output channel, and cost.
+1. **A standardized agent event schema, with non-ADK adapters.** Anchor on the BigQuery-native shape BQ Agent Analytics already provides for ADK agents; push toward alignment with OpenTelemetry GenAI conventions, with first-class fields for delegation chain, instruction provenance, output channel, and cost. Define an equivalent exporter/adapter path so non-ADK agents (Claude Code-class Jarvis, third-party agents) can land on the same BigQuery substrate without forcing an ADK migration.
 2. **Stable agent identity plus per-turn attestation.** Identity like a modern service account; attestation as a signed per-turn artifact (model, version, config hash, tool set, delegation chain).
 3. **A delegation artifact for cross-agent calls.** When Jarvis delegates to BQ CA, the call should carry a machine-verifiable artifact, not an implicit trust relationship or only a forwarded user token.
 4. **Per-turn, instruction-aware policy primitives.** Evaluate the instantiated call (not only the grant) against intent, instruction provenance, data sensitivity, output channel, and cost. Hardest research direction, most differentiating.
