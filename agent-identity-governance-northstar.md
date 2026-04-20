@@ -1,6 +1,6 @@
 # Agents in the Enterprise: A Northstar for Identity, Governance, and Security Boundaries
 
-*v1 draft - Haiyuan Cao + [EM, BigQuery Conversational Analytics] - for co-author review*
+*v1.2 draft - Haiyuan Cao + [EM, BigQuery Conversational Analytics] - for co-author review*
 
 > **TL;DR.** The motivating enterprise user is a knowledge worker running a personalized, proactive agent - call it Jarvis - over their work surface. In our worked example, Jarvis is a Claude-class assistant (think Claude Code or a similar general-purpose business agent) with broad but bounded access to chat, docs, and **BigQuery Data Cloud**, and it may delegate natural-language data tasks to [BigQuery Conversational Analytics](https://docs.cloud.google.com/bigquery/docs/conversational-analytics). Even with a single agent per user, today's stack does not cleanly answer three questions: *what is this agent authorized to do right now, what did it actually do, and how much did it spend.* Our northstar: every agent action must be **attributed** to a stable agent identity plus per-turn attestation, **bounded** by a per-turn, instruction-aware policy, and **observable** as a structured event stream that also supports cost attribution through joins to BigQuery billing data. [BigQuery Agent Analytics](https://adk.dev/integrations/bigquery-agent-analytics/) is the strongest concrete foundation for the observability and audit half of that loop **for ADK-based agents today**; non-ADK Jarvis agents (e.g., Claude Code-class) need equivalent export/adapters to land events on the same BigQuery audit substrate. Agent identity and per-turn policy are the remaining gap to align on.
 
@@ -115,7 +115,7 @@ Stable identity is long-lived — e.g., `jarvis-agent@corp` — and behaves like
 
 The tradeoff is audit clarity and blast-radius containment (more identities) against operational cost (more access reviews and rotation surface). "How many agent identities" is a concrete product decision, not just architectural preference.
 
-**Continuity across durable enterprise work.** Identity has to stay stable across more than model and config changes — it must survive the realities of enterprise work: missions that span days, multiple sessions, human approval gates, runtime restarts, credential rotations, and handoffs to other agents or humans. Stable identity is what keeps a multi-day mission **attributable end-to-end** (*who authorized this, is it still approved*), **revocable at any moment** (disable the identity, in-flight work for that agent stops), and **auditable as a single thread** across every handoff. Model rollbacks, A/B tests, and config edits update attestation, not identity — and the same is true for session boundaries, runtime swaps, credential rotations, and human-in-the-loop handoffs.
+**Continuity across durable enterprise work.** Identity has to stay stable across more than model and config changes — it must survive the realities of enterprise work: missions that span days, multiple sessions, human approval gates, runtime restarts, credential rotations, and handoffs to other agents or humans. Stable identity is what keeps a multi-day mission **attributable end-to-end** (*who authorized this, is it still approved*), **revocable at the control plane** (disable the identity and subsequent privileged actions and resource accesses are denied at the next check; already-running compute may continue briefly until it hits one), and **auditable as a single thread** across every handoff. Model rollbacks, A/B tests, and config edits update attestation, not identity — and the same is true for session boundaries, runtime swaps, credential rotations, and human-in-the-loop handoffs.
 
 ### P2. Authority must be bounded by per-turn, instruction-aware policy
 
@@ -240,7 +240,9 @@ The framing bet: **observability is here now; stable agent identity plus per-tur
 
 ### Versioning
 
-- **v0**: initial framing draft for co-author alignment
-- **v1** (this revision): reframed around a single Jarvis-style personalized proactive agent over BigQuery Data Cloud; sharpened the authority-drift distinction (tool grant vs. instantiated call); separated stable identity from per-turn attestation; added data-exfiltration and cost-observability scenarios; multi-agent demoted to an extension.
-- **v2** (target): incorporate BQ CA, security, and compliance feedback; lock v1 demo scope.
+- **v0**: initial framing draft for co-author alignment.
+- **v1**: reframed around a single Jarvis-style personalized proactive agent over BigQuery Data Cloud; sharpened the authority-drift distinction (tool grant vs. instantiated call); separated stable identity from per-turn attestation; added data-exfiltration and cost-observability scenarios; multi-agent demoted to an extension.
+- **v1.1**: scoped BQAA claims to ADK-based agents (non-ADK agents need equivalent exporters); softened cost-attribution claims (cost comes from joining BQAA events to `INFORMATION_SCHEMA.JOBS`, Cloud Audit Logs, and billing export, not from native BQAA fields); corrected "per-turn floor" to "turn-level runtime bound inside the IAM ceiling."
+- **v1.2** (this revision): P1 rewritten around three structural conditions — platform-recognized and source-enforced identity, explicit identity cardinality rule for published vs. user-bound vs. sub-agents, and continuity across durable enterprise work (multi-day missions, handoffs, credential rotation). §2.1 names the middleware-only failure mode directly.
+- **v2** (target): lock v1 demo scope (§7 Q5); incorporate security and compliance review.
 - **v3** (target): externalizable position paper or blog form.
