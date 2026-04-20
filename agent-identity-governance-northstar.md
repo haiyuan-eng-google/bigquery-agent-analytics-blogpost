@@ -41,6 +41,8 @@ In practice one of three things happens today, and each has a known failure mode
 - **The agent acts under its own service identity.** Service logs are cleaner, but user-level attribution is weakened and row-level controls tied to the user's identity no longer apply without additional signal.
 - **A delegated chain exists informally** - user approved the agent, agent chose a tool, tool called BigQuery - but it is not modeled as a first-class object. You cannot query it. You cannot attach policy to it. You cannot audit against it.
 
+Cutting across all three: when agent identity lives only at the **application or middleware layer** — a header the agent sets, a claim a sidecar validates — downstream IAM, network controls, dataset policies, and audit logs do not recognize it. It cannot be revoked with one IAM call. It cannot appear in a dataset-level deny rule. It cannot be scoped by VPC-SC. In Cloud Audit Logs it surfaces only indirectly, through the runtime service account. For enterprise governance, agent identity has to be **platform-recognized and enforced at the source** — a first-class IAM principal that the data plane and the network plane natively understand — not bolted on in middleware in front of tool calls.
+
 **Can we query this informal chain today?** Partially, and the path is worth naming. [BigQuery Agent Analytics](https://adk.dev/integrations/bigquery-agent-analytics/) captures structured ADK agent events into BigQuery with OpenTelemetry trace and span correlation. Joining those events to `INFORMATION_SCHEMA.JOBS` and Cloud Audit Logs reconstructs a usable picture of what the agent did, what SQL ran, and what it cost. That is the audit substrate. What is missing is a **native, queryable representation of the delegation relationship itself** (user, stable agent identity, per-turn attestation, sub-agent, tool, resource) alongside the event stream. This is the first gap, and it applies equally to single-agent and multi-agent execution.
 
 ### 2.2 Authority drift
@@ -89,19 +91,31 @@ Without this record, *"the agent did the wrong thing"* is very hard to investiga
 
 ## 3. Four northstar principles
 
-### P1. Agent identity must be first-class - stable, with per-turn attestation
+### P1. Agent identity must be first-class - platform-recognized, stable, with per-turn attestation
 
-Each agent should have a **stable identity**, distinct from:
+"First-class" means three things, and all three have to hold.
+
+**Platform-recognized and source-enforced.** Agent identity must live at the platform layer — a first-class IAM principal that dataset policies, network controls (VPC-SC, perimeter allow-lists), and Cloud Audit Logs natively understand. Not an application-level header. Not a claim validated only by middleware in front of tool calls. The bolted-on variant collapses the moment an attacker reaches a tool directly, a new SDK skips the middleware, or an audit investigator has to reconstruct who acted from indirect signals. The embedded variant is what makes *"revoke this agent with one IAM call,"* *"deny this identity on hr.comp,"* and *"restrict this identity to the prod VPC-SC perimeter"* actually possible.
+
+**Stable identity, distinct from related principals.** Each agent has a **stable identity** distinct from:
 
 - the human user it serves
 - the runtime service account it runs under
 - the downstream tool or data system it calls
 
-Stable identity is long-lived - e.g., `jarvis-agent@corp` - and behaves like a modern service account. It is the object that policy, audit, and access reviews attach to. It does **not** change when the model is upgraded or the system prompt is edited.
+Stable identity is long-lived — e.g., `jarvis-agent@corp` — and behaves like a modern service account. It is the object that policy, audit, and access reviews attach to. It does **not** change when the model is upgraded, the system prompt is edited, or the runtime is swapped.
 
-**Per-turn attestation** is a separate artifact emitted with each execution: model family and version (e.g., Claude Opus 4.7), system-prompt and config hash, tool set, and the delegation chain for that turn (`user -> jarvis-agent -> bq-ca-data-agent -> bq.run_sql -> sales.customers`). Attestation answers *"with what version and configuration did this identity act on Tuesday at 14:03."*
+**Per-turn attestation.** A separate artifact emitted with each execution: model family and version (e.g., Claude Opus 4.7), system-prompt and config hash, tool set, and the delegation chain for that turn (`user -> jarvis-agent -> bq-ca-data-agent -> bq.run_sql -> sales.customers`). Attestation answers *"with what version and configuration did this identity act on Tuesday at 14:03."*
 
-This separation matters because identities must stay stable even as the underlying agent changes. Model rollbacks, A/B tests, and config edits update attestation, not identity. Policy and audit history remain coherent across agent upgrades.
+**Identity granularity — the cardinality rule.** The northstar needs an explicit identity boundary, especially for published and shared agents, because revocation, blast-radius, and audit attribution all depend on it. Recommended starting rules:
+
+- **Published or shared agents** (one Jarvis offering serving many users) → one stable agent identity per **deployment** (`jarvis-agent@corp`), with per-turn attestation and a delegation chain naming which user authorized each turn. One IAM call revokes the agent for every user at once.
+- **User-bound or tenant-bound Jarvis** (separate instances per user or team) → per-user or per-tenant identities (`jarvis-agent.alice@corp`, `jarvis-agent.team-sales@corp`) when blast-radius isolation is worth the extra access-review overhead.
+- **Sub-agents delegated to** (e.g., a BQ CA data agent called by Jarvis) → their own identities, not arguments to the parent's. The delegation chain in attestation names them explicitly.
+
+The tradeoff is audit clarity and blast-radius containment (more identities) against operational cost (more access reviews and rotation surface). "How many agent identities" is a concrete product decision, not just architectural preference.
+
+**Continuity across durable enterprise work.** Identity has to stay stable across more than model and config changes — it must survive the realities of enterprise work: missions that span days, multiple sessions, human approval gates, runtime restarts, credential rotations, and handoffs to other agents or humans. Stable identity is what keeps a multi-day mission **attributable end-to-end** (*who authorized this, is it still approved*), **revocable at any moment** (disable the identity, in-flight work for that agent stops), and **auditable as a single thread** across every handoff. Model rollbacks, A/B tests, and config edits update attestation, not identity — and the same is true for session boundaries, runtime swaps, credential rotations, and human-in-the-loop handoffs.
 
 ### P2. Authority must be bounded by per-turn, instruction-aware policy
 
