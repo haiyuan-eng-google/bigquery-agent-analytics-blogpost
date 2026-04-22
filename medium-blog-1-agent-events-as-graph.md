@@ -5,10 +5,11 @@ EDITORIAL NOTES — NOT PUBLISHABLE. Remove this block before paste to Medium.
 
 Status: Draft with real-data captures from a live run of the
 Calendar-Assistant demo agent against test-project-0728-467323 /
-agent_analytics_demo (location US), running Gemini 2.5 Flash via
-Vertex AI. All trace IDs, session IDs, latencies, LLM outputs,
-and INFORMATION_SCHEMA numbers in this draft are real and match
-what demo_calendar_assistant.py produces.
+agent_analytics_demo (location US), running Gemini 3 Flash Preview
+via Vertex AI Express Mode (API-key auth). All trace IDs, session
+IDs, latencies, LLM outputs, and INFORMATION_SCHEMA numbers in
+this draft are real and match what demo_calendar_assistant.py
+produces with GOOGLE_CLOUD_API_KEY + GOOGLE_GENAI_USE_VERTEXAI=true.
 
 Target publication: Google Cloud Community / The Generator.
 Target length: 1,400-1,800 words (current: ~1,900).
@@ -80,7 +81,7 @@ Here's a real scenario. I built a Calendar-Assistant ADK agent with three tools:
 
 A user sends: *"Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes."*
 
-The agent runs. It eventually responds: *"I found a few Priyas: Priya Patel, Priya Shah, and Priya Venkat. Which one would you like to book a meeting with?"*
+The agent runs. It eventually responds: *"I found three people named Priya: Priya Patel (Platform), Priya Shah (Design), and Priya Venkat (Research). Which Priya would you like to book the meeting with?"*
 
 Is that right? Is the agent asking because it legitimately couldn't disambiguate, or because it gave up? Did the `search_contacts` tool actually return three candidates, or something weirder? And did the agent *try* to book before asking?
 
@@ -100,26 +101,26 @@ client = Client(
     location="US",
 )
 
-trace = client.get_session_trace("40eb2ffb-dadb-4004-87e9-b42d01af617b")
+trace = client.get_session_trace("84ef108d-745c-451a-ae79-d0f97673268d")
 trace.render()
 ```
 
 Output:
 
 ```
-Trace: e-2de41b65-b3b8-4b66-9b46-3c9751d93c2c | Session: 40eb2ffb-dadb-4004-87e9-b42d01af617b | 5698ms
+Trace: e-ae1fe18c-887e-4df3-a91f-25eec174e2dd | Session: 84ef108d-745c-451a-ae79-d0f97673268d | 5235ms
 ======================================================================================================
 └─ [✓] USER_MESSAGE_RECEIVED [calendar_assistant] - Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes.
 └─ [✓] INVOCATION_STARTING [calendar_assistant]
-└─ [✓] INVOCATION_COMPLETED [calendar_assistant] (24372ms)
+└─ [✓] INVOCATION_COMPLETED [calendar_assistant] (19778ms)
    ├─ [✓] AGENT_STARTING [calendar_assistant] - You are a calendar assistant. When the user asks to book a meeting, first use search_contacts to find the person. If ...
-   └─ [✓] AGENT_COMPLETED [calendar_assistant] (5697ms)
-      ├─ [✓] LLM_REQUEST [calendar_assistant] (gemini-2.5-flash) - Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes.
-      ├─ [✓] LLM_RESPONSE [calendar_assistant] (2287ms) - call: search_contacts
+   └─ [✓] AGENT_COMPLETED [calendar_assistant] (5234ms)
+      ├─ [✓] LLM_REQUEST [calendar_assistant] (gemini-3-flash-preview) - Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes.
+      ├─ [✓] LLM_RESPONSE [calendar_assistant] (2972ms) - call: search_contacts
       ├─ [✓] TOOL_STARTING [calendar_assistant] (search_contacts)
       ├─ [✓] TOOL_COMPLETED [calendar_assistant] (search_contacts) (0ms)
-      ├─ [✓] LLM_REQUEST [calendar_assistant] (gemini-2.5-flash) - Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes.
-      └─ [✓] LLM_RESPONSE [calendar_assistant] (2123ms) - text: "I found a few Priyas: Priya Patel, Priya Shah, and Priya Venkat. Which one would you like to book..."
+      ├─ [✓] LLM_REQUEST [calendar_assistant] (gemini-3-flash-preview) - Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes.
+      └─ [✓] LLM_RESPONSE [calendar_assistant] (2175ms) - text: "I found three people named Priya: Priya Patel (Platform), Priya Shah (Design), and Priya Venkat..."
 ```
 
 There it is. Read the `search_contacts` round-trip. The agent got back *three* matching contacts, and instead of picking one, it asked the user which Priya they meant. That's the *right* call — but you couldn't see it in the raw `agent_events` rows without reconstructing the tool round-trip yourself.
@@ -141,7 +142,7 @@ Need the structured version for a ticket or a dashboard? Two more properties:
 
 `trace.tool_calls` pulls every tool invocation with its args and result. `trace.error_spans` gives you just the failures. Both are lists of well-typed objects — no JSON-digging. The `tool_name` on each `Span` is a first-class property; you don't reach into `span.content["tool"]` to get it. Same for `error_message` and `parent_span_id`. The raw dict is still there if you want it, but you rarely need to.
 
-What did the successful path look like? A different session in the same fleet, where the user said *"Book a 30-minute meeting with Priya Patel on April 28 at 3:30pm"* — unambiguous — produced a clean three-tool chain: `search_contacts → get_calendar_availability → book_meeting`, `✓` all the way down, 71 seconds end-to-end. One line of Python per trace; same `.render()` call. The SDK doesn't care whether the agent asked, decided, or failed — it just shows you the shape of what happened.
+What did the successful path look like? A different session in the same fleet, where the user said *"Book a 30-minute meeting with Priya Patel on April 28 at 3:30pm"* — unambiguous — produced a clean three-tool chain: `search_contacts → get_calendar_availability → book_meeting`, `✓` all the way down, 8.7 seconds end-to-end. One line of Python per trace; same `.render()` call. The SDK doesn't care whether the agent asked, decided, or failed — it just shows you the shape of what happened.
 
 Running this in a terminal? `trace.render(color=True)` wraps error markers in red ANSI and subtree-warning markers in yellow. Default stays plain so your CI logs and notebook captures aren't full of escape codes.
 
@@ -182,7 +183,7 @@ Real output against the same fleet:
 
 ```
 1 / 5 traces hit multi-match contact ambiguity
-  40eb2ffb -> "I found a few Priyas: Priya Patel, Priya Shah, and Priya Venkat. Which one..."
+  84ef108d -> "text: 'I found three people named Priya: Priya Patel (Platform), Priya Shah (Des"
 ```
 
 One session in five hit the ambiguity. The SDK pulled it out in a single comprehension, and we know the exact session to pull up in the next step if we want to dig deeper. That's a filter you couldn't write in SQL without knowing your `content` JSON schema cold. In Python, it's idiomatic.
@@ -219,10 +220,10 @@ Real output against the same dataset, immediately after the five-session demo ab
 
 ```
 sdk_feature,runs,gb_processed,avg_slot_ms
-trace-read,14,0.068,466
+trace-read,6,0.029,1742
 ```
 
-Fourteen runs of the `trace-read` feature (every `get_session_trace` and `list_traces` call from sections 4 and 5), 68 MB processed total, 466ms average slot time. As you use more of the SDK, more `sdk_feature` rows appear — `evaluate-categorical`, `insights`, `list-sessions` — each with its own cost profile. That's the kind of transparency you want from a library sitting between your agent logs and your BQ bill. The SDK labels the queries; you decide the budget.
+Six runs of the `trace-read` feature (every `get_session_trace` and `list_traces` call from sections 4 and 5), 29 MB processed total, 1.7 seconds average slot time. As you use more of the SDK, more `sdk_feature` rows appear — `evaluate-categorical`, `insights`, `list-sessions` — each with its own cost profile. That's the kind of transparency you want from a library sitting between your agent logs and your BQ bill. The SDK labels the queries; you decide the budget.
 
 ## 7. Try it
 
