@@ -128,7 +128,7 @@ There it is. Read the `search_contacts` round-trip. The agent got back *three* m
 
 > **The tree shows you the decision, not just the outcome.**
 
-You can't see that in twelve rows. You can see it in the tree in two seconds.
+You can't see that in eleven rows. You can see it in the tree in two seconds.
 
 Need the structured version for a ticket or a dashboard? Two more properties:
 
@@ -163,7 +163,7 @@ traces = client.list_traces(
     )
 )
 
-ambiguity_bugs = [
+ambiguity_traces = [
     t for t in traces
     if any(
         tc["tool_name"] == "search_contacts"
@@ -173,8 +173,8 @@ ambiguity_bugs = [
     )
 ]
 
-print(f"{len(ambiguity_bugs)} / {len(traces)} traces hit multi-match contact ambiguity")
-for t in ambiguity_bugs:
+print(f"{len(ambiguity_traces)} / {len(traces)} traces hit multi-match contact ambiguity")
+for t in ambiguity_traces:
     print(f"  {t.session_id[:8]} -> {(t.final_response or '')[:80]!r}")
 ```
 
