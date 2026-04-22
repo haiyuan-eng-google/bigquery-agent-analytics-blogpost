@@ -1,10 +1,14 @@
 """Calendar-Assistant demo agent for Medium blog post #1.
 
 Three tools against an in-memory fake store, seeded with a deliberate
-name ambiguity (three "Priya" contacts) so that a single session
-demonstrates the core narrative of the blog post: the agent booking
-the wrong meeting when search_contacts returns multiple matches and
-the LLM doesn't ask to disambiguate.
+name ambiguity (three "Priya" contacts) so that the blog post's
+featured trace reproduces: when the user asks to book "a 1:1 with
+Priya," the search_contacts tool returns three matches and the
+agent asks the user which Priya they meant rather than picking one.
+Unambiguous prompts (e.g., "Priya Patel" or "Jordan Lee") exercise
+the full search_contacts -> get_calendar_availability -> book_meeting
+chain instead, producing the contrasting clean-path trace the post
+references.
 
 Run:
     PROJECT_ID=... DATASET_ID=... python demo_calendar_assistant.py
@@ -138,9 +142,10 @@ root_agent = LlmAgent(
         "You are a calendar assistant. When the user asks to book a meeting, "
         "first use search_contacts to find the person. If search_contacts "
         "returns a single match, proceed with get_calendar_availability and "
-        "then book_meeting. If it returns multiple matches, pick one based "
-        "on context and proceed. Always confirm the booking to the user with "
-        "the contact's full name and the meeting time."
+        "then book_meeting. If it returns multiple matches, stop and ask the "
+        "user which person they meant; do not guess. If it returns zero "
+        "matches, tell the user you could not find the contact. Always "
+        "confirm bookings by the contact's full name and the meeting time."
     ),
     model="gemini-2.5-flash",
     tools=[search_contacts, get_calendar_availability, book_meeting],

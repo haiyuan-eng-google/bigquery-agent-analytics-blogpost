@@ -74,17 +74,17 @@ bq-agent-sdk doctor
 
 If doctor is green, you're done. Now the interesting part.
 
-## 4. The demo — The Calendar-Assistant bug
+## 4. The demo — Is the Calendar-Assistant broken?
 
-Here's a real scenario. I built a Calendar-Assistant ADK agent with three tools: `search_contacts(name)`, `get_calendar_availability(contact_id, date_range)`, and `book_meeting(contact_id, slot)`. It's the kind of agent anyone building a scheduling bot writes in an afternoon.
+Here's a real scenario. I built a Calendar-Assistant ADK agent with three tools: `search_contacts(name)`, `get_calendar_availability(contact_id, date)`, and `book_meeting(contact_id, slot)`. It's the kind of agent anyone building a scheduling bot writes in an afternoon. The address book has three contacts named Priya — Priya Patel, Priya Shah, Priya Venkat — by design, to test how the agent handles ambiguity.
 
-A user sends: *"Book me a 1:1 with Priya next Tuesday."*
+A user sends: *"Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes."*
 
-The agent runs. It eventually responds: *"Done! 1:1 with Priya P. booked for Tuesday at 2pm."*
+The agent runs. It eventually responds: *"I found a few Priyas: Priya Patel, Priya Shah, and Priya Venkat. Which one would you like to book a meeting with?"*
 
-Except the meeting got booked with the wrong Priya.
+Is that right? Is the agent asking because it legitimately couldn't disambiguate, or because it gave up? Did the `search_contacts` tool actually return three candidates, or something weirder? And did the agent *try* to book before asking?
 
-You open BigQuery. There are the rows. `USER_MESSAGE_RECEIVED`, `AGENT_STARTING`, a `LLM_REQUEST`, some `LLM_RESPONSE` spans, three `TOOL_STARTING` rows, three `TOOL_COMPLETED` rows, one more `LLM_RESPONSE`, `AGENT_COMPLETED`. Everything says `status=OK`. The `error_message` column is `NULL` everywhere. There is no bug in these rows — there's a *judgment* bug somewhere in the tool results.
+You open BigQuery. There are the rows. `USER_MESSAGE_RECEIVED`, `INVOCATION_STARTING`, `AGENT_STARTING`, `LLM_REQUEST`, `LLM_RESPONSE` with `call: search_contacts`, `TOOL_STARTING`, `TOOL_COMPLETED`, another `LLM_REQUEST`, another `LLM_RESPONSE`, `AGENT_COMPLETED`, `INVOCATION_COMPLETED`. Twelve rows. Everything says `status=OK`. The `error_message` column is `NULL` everywhere. Nothing in the row structure tells you *why* the agent chose to ask instead of booking.
 
 Fine. One line:
 
@@ -173,14 +173,16 @@ ambiguity_bugs = [
     )
 ]
 
-print(f"{len(ambiguity_bugs)} / {len(traces)} traces matched an ambiguous contact")
+print(f"{len(ambiguity_bugs)} / {len(traces)} traces hit multi-match contact ambiguity")
+for t in ambiguity_bugs:
+    print(f"  {t.session_id[:8]} -> {(t.final_response or '')[:80]!r}")
 ```
 
 Real output against the same fleet:
 
 ```
 1 / 5 traces hit multi-match contact ambiguity
-  ambiguity: 40eb2ffb -> "I found a few Priyas: Priya Patel, Priya Shah, and Priya Venkat. Which one..."
+  40eb2ffb -> "I found a few Priyas: Priya Patel, Priya Shah, and Priya Venkat. Which one..."
 ```
 
 One session in five hit the ambiguity. The SDK pulled it out in a single comprehension, and we know the exact session to pull up in the next step if we want to dig deeper. That's a filter you couldn't write in SQL without knowing your `content` JSON schema cold. In Python, it's idiomatic.
