@@ -12,7 +12,8 @@ this draft are real and match what demo_calendar_assistant.py
 produces with GOOGLE_CLOUD_API_KEY + GOOGLE_GENAI_USE_VERTEXAI=true.
 
 Target publication: Google Cloud Community / The Generator.
-Target length: 1,400-1,800 words (current: ~1,900).
+Target length: 1,400-1,800 words (current article body: ~1,630,
+within target).
 
 Section 6 is now un-gated — SDK queries carry the labels
 `sdk=bigquery-agent-analytics`, `sdk_feature=*`,
@@ -142,13 +143,11 @@ Need the structured version for a ticket or a dashboard? Two more properties:
 
 `trace.tool_calls` pulls every tool invocation with its args and result. `trace.error_spans` gives you just the failures. Both are lists of well-typed objects — no JSON-digging. The `tool_name` on each `Span` is a first-class property; you don't reach into `span.content["tool"]` to get it. Same for `error_message` and `parent_span_id`. The raw dict is still there if you want it, but you rarely need to.
 
-What did the successful path look like? A different session in the same fleet, where the user said *"Book a 30-minute meeting with Priya Patel on April 28 at 3:30pm"* — unambiguous — produced a clean three-tool chain: `search_contacts → get_calendar_availability → book_meeting`, `✓` all the way down, 8.7 seconds end-to-end. One line of Python per trace; same `.render()` call. The SDK doesn't care whether the agent asked, decided, or failed — it just shows you the shape of what happened.
-
 Running this in a terminal? `trace.render(color=True)` wraps error markers in red ANSI and subtree-warning markers in yellow. Default stays plain so your CI logs and notebook captures aren't full of escape codes.
 
-## 5. Going deeper — finding every Priya bug
+## 5. Going deeper — finding every ambiguity trace
 
-> **One bug is interesting. Twenty Priya-like bugs is a pattern.**
+> **One ambiguity is a decision. Twenty is a pattern worth designing around.**
 
 The SDK lets you pivot from single-trace debugging to fleet-level triage in one step:
 
