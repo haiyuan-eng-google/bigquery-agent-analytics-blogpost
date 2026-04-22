@@ -85,7 +85,7 @@ The agent runs. It eventually responds: *"I found three people named Priya: Priy
 
 Is that right? Is the agent asking because it legitimately couldn't disambiguate, or because it gave up? Did the `search_contacts` tool actually return three candidates, or something weirder? And did the agent *try* to book before asking?
 
-You open BigQuery. There are the rows. `USER_MESSAGE_RECEIVED`, `INVOCATION_STARTING`, `AGENT_STARTING`, `LLM_REQUEST`, `LLM_RESPONSE` with `call: search_contacts`, `TOOL_STARTING`, `TOOL_COMPLETED`, another `LLM_REQUEST`, another `LLM_RESPONSE`, `AGENT_COMPLETED`, `INVOCATION_COMPLETED`. Twelve rows. Everything says `status=OK`. The `error_message` column is `NULL` everywhere. Nothing in the row structure tells you *why* the agent chose to ask instead of booking.
+You open BigQuery. There are the rows. `USER_MESSAGE_RECEIVED`, `INVOCATION_STARTING`, `AGENT_STARTING`, `LLM_REQUEST`, `LLM_RESPONSE` with `call: search_contacts`, `TOOL_STARTING`, `TOOL_COMPLETED`, another `LLM_REQUEST`, another `LLM_RESPONSE`, `AGENT_COMPLETED`, `INVOCATION_COMPLETED`. Eleven rows. Everything says `status=OK`. The `error_message` column is `NULL` everywhere. Nothing in the row structure tells you *why* the agent chose to ask instead of booking.
 
 Fine. One line:
 

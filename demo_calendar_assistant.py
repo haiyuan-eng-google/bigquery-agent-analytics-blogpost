@@ -13,8 +13,18 @@ references.
 Run:
     PROJECT_ID=... DATASET_ID=... python demo_calendar_assistant.py
 
+The script works with any valid google-genai auth (ADC + Vertex,
+Vertex Express Mode, or Developer API), but the exact traces
+captured in the blog post were produced with Vertex AI Express
+Mode, which needs both of these environment variables in
+addition to the two above:
+
+    GOOGLE_CLOUD_API_KEY=<vertex-api-key>
+    GOOGLE_GENAI_USE_VERTEXAI=true
+
 Traces land in the configured BigQuery dataset via
-BigQueryAgentAnalyticsPlugin.
+BigQueryAgentAnalyticsPlugin (writes still use ADC, independent
+of how the LLM calls authenticate).
 """
 
 from __future__ import annotations
