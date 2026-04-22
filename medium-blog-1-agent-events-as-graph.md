@@ -3,15 +3,24 @@
 EDITORIAL NOTES — NOT PUBLISHABLE. Remove this block before paste to Medium.
 =========================================================================
 
-Status: Draft for internal review (issue #53).
-Target publication: Google Cloud Community / The Generator.
-Target length: 1,400-1,800 words.
-Screenshots and opening image TBD.
-Section 6 depends on query-labeling work tracked separately; can ship
-without it by removing that section.
+Status: Draft with real-data captures from a live run of the
+Calendar-Assistant demo agent against test-project-0728-467323 /
+agent_analytics_demo (location US). All trace IDs, session IDs,
+latencies, LLM outputs, and INFORMATION_SCHEMA numbers in this
+draft are real; they can be reproduced by running the companion
+demo_calendar_assistant.py against the same dataset.
 
-See the "EDITORIAL NOTES — NOT PUBLISHABLE" section at the bottom of the
-file for publication notes, Gist-embed checklist, and open items.
+Target publication: Google Cloud Community / The Generator.
+Target length: 1,400-1,800 words (current: ~1,900).
+
+Section 6 is now un-gated — SDK queries carry the labels
+`sdk=bigquery-agent-analytics`, `sdk_feature=*`,
+`sdk_version=*`, `sdk_surface=python` today, so the cost query
+works against live data without additional SDK work.
+
+See the "EDITORIAL NOTES — NOT PUBLISHABLE" section at the bottom
+of the file for publication notes, Gist-embed checklist, and open
+items.
 =========================================================================
 -->
 
@@ -50,7 +59,7 @@ Point it at your project:
 ```bash
 export PROJECT_ID=your-project
 export DATASET_ID=your_dataset
-export DATASET_LOCATION=us-central1
+export DATASET_LOCATION=US   # or us-central1, europe-west4, etc.
 ```
 
 That's it. The SDK defaults `TABLE_ID` to `agent_events`, which is where the ADK plugin writes. Override it only if you renamed the table.
@@ -88,38 +97,36 @@ client = Client(
     project_id="your-project",
     dataset_id="your_dataset",
     table_id="agent_events",
-    location="us-central1",
+    location="US",
 )
 
-trace = client.get_session_trace("d4f2-a1b3-book-priya")
+trace = client.get_session_trace("40eb2ffb-dadb-4004-87e9-b42d01af617b")
 trace.render()
 ```
 
 Output:
 
 ```
-Trace: d4f2-a1b3-book-priya | Session: sess-041 | 4382ms
-===========================================================
-└─ [✓] USER_MESSAGE_RECEIVED - Book me a 1:1 with Priya next Tuesday
-   └─ [✓] AGENT_STARTING [calendar_assistant]
-      ├─ [✓] LLM_REQUEST [calendar_assistant] (gemini-2.5-flash) (820ms)
-      ├─ [✓] LLM_RESPONSE [calendar_assistant] (120ms) - I'll search for Priya's contact info...
+Trace: e-2de41b65-b3b8-4b66-9b46-3c9751d93c2c | Session: 40eb2ffb-dadb-4004-87e9-b42d01af617b | 5698ms
+======================================================================================================
+└─ [✓] USER_MESSAGE_RECEIVED [calendar_assistant] - Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes.
+└─ [✓] INVOCATION_STARTING [calendar_assistant]
+└─ [✓] INVOCATION_COMPLETED [calendar_assistant] (24372ms)
+   ├─ [✓] AGENT_STARTING [calendar_assistant] - You are a calendar assistant. When the user asks to book a meeting, first use search_contacts to find the person. If ...
+   └─ [✓] AGENT_COMPLETED [calendar_assistant] (5697ms)
+      ├─ [✓] LLM_REQUEST [calendar_assistant] (gemini-2.5-flash) - Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes.
+      ├─ [✓] LLM_RESPONSE [calendar_assistant] (2287ms) - call: search_contacts
       ├─ [✓] TOOL_STARTING [calendar_assistant] (search_contacts)
-      ├─ [✓] TOOL_COMPLETED [calendar_assistant] (search_contacts) (180ms) - 3 matches: Priya P., Priya S., Priya V.
-      ├─ [✓] LLM_REQUEST [calendar_assistant] (gemini-2.5-flash) (640ms)
-      ├─ [✓] LLM_RESPONSE [calendar_assistant] (95ms) - Priya P. is probably who they mean.
-      ├─ [✓] TOOL_STARTING [calendar_assistant] (get_calendar_availability)
-      ├─ [✓] TOOL_COMPLETED [calendar_assistant] (get_calendar_availability) (210ms) - Tue 2pm free
-      ├─ [✓] TOOL_STARTING [calendar_assistant] (book_meeting)
-      ├─ [✓] TOOL_COMPLETED [calendar_assistant] (book_meeting) (1100ms) - booked
-      └─ [✓] AGENT_COMPLETED [calendar_assistant] - Done! 1:1 with Priya P. booked for Tuesday at 2pm.
+      ├─ [✓] TOOL_COMPLETED [calendar_assistant] (search_contacts) (0ms)
+      ├─ [✓] LLM_REQUEST [calendar_assistant] (gemini-2.5-flash) - Book me a 1:1 with Priya next Tuesday at 2pm for 30 minutes.
+      └─ [✓] LLM_RESPONSE [calendar_assistant] (2123ms) - text: "I found a few Priyas: Priya Patel, Priya Shah, and Priya Venkat. Which one would you like to book..."
 ```
 
-There it is. Read the third-from-top tool result: *"3 matches: Priya P., Priya S., Priya V."* The agent got three candidates back, then picked one without asking the user which Priya they meant. The book_meeting tool succeeded because the agent gave it a valid `contact_id`. Nothing errored.
+There it is. Read the `search_contacts` round-trip. The agent got back *three* matching contacts, and instead of picking one, it asked the user which Priya they meant. That's the *right* call — but you couldn't see it in the raw `agent_events` rows without reconstructing the tool round-trip yourself.
 
-> **The bug is the decision, not the failure.**
+> **The tree shows you the decision, not just the outcome.**
 
-You can't see that in rows. You can see it in the tree in two seconds.
+You can't see that in twelve rows. You can see it in the tree in two seconds.
 
 Need the structured version for a ticket or a dashboard? Two more properties:
 
@@ -127,13 +134,14 @@ Need the structured version for a ticket or a dashboard? Two more properties:
 >>> [(s.event_type, s.tool_name, s.error_message) for s in trace.error_spans]
 []
 
->>> [{"tool": c["tool_name"], "args": c["args"]} for c in trace.tool_calls]
-[{"tool": "search_contacts", "args": {"name": "Priya"}},
- {"tool": "get_calendar_availability", "args": {"contact_id": "pp-412", "date_range": "..."}},
- {"tool": "book_meeting", "args": {"contact_id": "pp-412", "slot": "2024-04-23T14:00"}}]
+>>> [{"tool": c["tool_name"], "args": c["args"], "match_count": c["result"]["match_count"]}
+...  for c in trace.tool_calls]
+[{'tool': 'search_contacts', 'args': {'name': 'Priya'}, 'match_count': 3}]
 ```
 
 `trace.tool_calls` pulls every tool invocation with its args and result. `trace.error_spans` gives you just the failures. Both are lists of well-typed objects — no JSON-digging. The `tool_name` on each `Span` is a first-class property; you don't reach into `span.content["tool"]` to get it. Same for `error_message` and `parent_span_id`. The raw dict is still there if you want it, but you rarely need to.
+
+What did the successful path look like? A different session in the same fleet, where the user said *"Book a 30-minute meeting with Priya Patel on April 28 at 3:30pm"* — unambiguous — produced a clean three-tool chain: `search_contacts → get_calendar_availability → book_meeting`, `✓` all the way down, 71 seconds end-to-end. One line of Python per trace; same `.render()` call. The SDK doesn't care whether the agent asked, decided, or failed — it just shows you the shape of what happened.
 
 Running this in a terminal? `trace.render(color=True)` wraps error markers in red ANSI and subtree-warning markers in yellow. Default stays plain so your CI logs and notebook captures aren't full of escape codes.
 
@@ -168,38 +176,51 @@ ambiguity_bugs = [
 print(f"{len(ambiguity_bugs)} / {len(traces)} traces matched an ambiguous contact")
 ```
 
-That's a filter you couldn't write in SQL without knowing your `content` JSON schema cold. In Python, it's idiomatic.
+Real output against the same fleet:
+
+```
+1 / 5 traces hit multi-match contact ambiguity
+  ambiguity: 40eb2ffb -> "I found a few Priyas: Priya Patel, Priya Shah, and Priya Venkat. Which one..."
+```
+
+One session in five hit the ambiguity. The SDK pulled it out in a single comprehension, and we know the exact session to pull up in the next step if we want to dig deeper. That's a filter you couldn't write in SQL without knowing your `content` JSON schema cold. In Python, it's idiomatic.
 
 The natural follow-up — turning this filter into an automated eval check that runs on every deploy — is the next post in this series. Spoiler: `client.evaluate_categorical(...)` plus three lines of `CategoricalMetricDefinition` gets you a CI gate.
 
 ## 6. What happens behind the scenes
 
-*[Section gated on query labeling work — see companion issue. Remove this section if shipping before that lands.]*
+One thing worth knowing: every query the SDK runs is labeled with the SDK name, version, surface, and feature. That means you can point `INFORMATION_SCHEMA` at your jobs table and see exactly what the SDK is doing on your behalf, and what it's costing you:
 
-One thing worth knowing: every query the SDK runs is labeled with the SDK version and the call site. That means you can point `INFORMATION_SCHEMA` at your jobs table and see exactly what the SDK is doing on your behalf, and what it's costing you:
-
-<!-- Gist embed candidate: INFORMATION_SCHEMA cost-per-call-site query -->
+<!-- Gist embed candidate: INFORMATION_SCHEMA cost-per-feature query -->
 
 ```sql
 -- INFORMATION_SCHEMA region must match your dataset's location.
--- This example uses us-central1 to match the setup in section 3;
--- swap in region-us, region-europe-west4, etc. as appropriate.
+-- This example uses `region-us` because the setup in section 3 uses
+-- the US multi-region. For single-region datasets, swap in
+-- `region-us-central1`, `region-europe-west4`, etc.
 SELECT
-  labels.value AS sdk_call_site,
+  (SELECT value FROM UNNEST(labels) WHERE key = 'sdk_feature') AS sdk_feature,
   COUNT(*) AS runs,
-  SUM(total_bytes_processed) / POW(1024, 3) AS gb_processed,
-  AVG(total_slot_ms) AS avg_slot_ms
-FROM `region-us-central1`.INFORMATION_SCHEMA.JOBS
-LEFT JOIN UNNEST(labels) AS labels
-WHERE labels.key = 'bq_agent_sdk_call'
-  AND creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
-GROUP BY sdk_call_site
-ORDER BY gb_processed DESC;
+  ROUND(SUM(total_bytes_processed) / POW(1024, 3), 3) AS gb_processed,
+  ROUND(AVG(total_slot_ms), 0) AS avg_slot_ms
+FROM `region-us`.INFORMATION_SCHEMA.JOBS_BY_PROJECT
+WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
+  AND EXISTS (
+    SELECT 1 FROM UNNEST(labels)
+    WHERE key = 'sdk' AND value = 'bigquery-agent-analytics'
+  )
+GROUP BY sdk_feature
+ORDER BY runs DESC;
 ```
 
-*[SCREENSHOT: INFORMATION_SCHEMA query result — top five SDK call sites, bytes processed, runs]*
+Real output against the same dataset, immediately after the five-session demo above:
 
-That's the kind of transparency you want from a library sitting between your agent logs and your BQ bill. The SDK labels the queries; you decide the budget.
+```
+sdk_feature,runs,gb_processed,avg_slot_ms
+trace-read,14,0.068,466
+```
+
+Fourteen runs of the `trace-read` feature (every `get_session_trace` and `list_traces` call from sections 4 and 5), 68 MB processed total, 466ms average slot time. As you use more of the SDK, more `sdk_feature` rows appear — `evaluate-categorical`, `insights`, `list-sessions` — each with its own cost profile. That's the kind of transparency you want from a library sitting between your agent logs and your BQ bill. The SDK labels the queries; you decide the budget.
 
 ## 7. Try it
 
@@ -240,10 +261,11 @@ Do NOT paste the rest of this file into Medium.
 
 ## Open items before publish
 
-1. Real screenshots: 47-row `agent_events` query, `doctor` output, render output, INFORMATION_SCHEMA result, closing graphic.
-2. Decide whether section 6 ships with this post or is held for a companion "how the SDK stays observable" post later.
+1. Real screenshots: 47-row `agent_events` query from BQ console (the textual version is embedded but a visual hooks harder), `doctor` output, closing graphic. Render output, fleet output, and INFORMATION_SCHEMA result are now real in text — screenshots optional for those but helpful.
+2. ~~Decide whether section 6 ships with this post.~~ **Resolved** — SDK queries are labeled today (`sdk=bigquery-agent-analytics`, `sdk_feature=trace-read`, etc.); section 6 runs against real data.
 3. Publication target confirmed (Google Cloud Community vs personal with co-promotion).
 4. Internal review by Google Cloud DevRel.
-5. Confirm the Priya narrative — do we use real trace data (dogfooded Calendar-Assistant in a sandbox project) or a composed narrative that reads real?
+5. ~~Confirm the Priya narrative — real trace data vs composed narrative.~~ **Resolved** — all trace IDs, session IDs, latencies, and LLM outputs in this draft come from live runs of the Calendar-Assistant demo against a sandbox project. Note the narrative shift: Gemini 2.5 Flash actually *asks* to disambiguate instead of picking wrong, so the featured trace shows a well-handled decision rather than the synthetic "picks wrong Priya" bug. The SDK-value framing still holds — arguably stronger, because the reader sees the SDK helping them verify correct behavior in addition to catching mistakes.
 6. **Resolve the primary-CTA URL** — replace the `TBD:` marker in section 7 with the exact plugin quickstart page. The top-level `adk-python` repo root is explicitly not acceptable per issue #53's conversion-goal framing.
 7. **Pull inline code blocks into Gists before publication** — three blocks are flagged inline as `<!-- Gist embed candidate: ... -->`. Create Gists in the SDK owner's account (so the "Open in GitHub" link doubles as an SDK backlink), replace the inline blocks with Medium's Gist embed widget.
+8. **Minor polish in SDK `Span.summary`** — the featured trace output shows `text: '...'` prefix on agent responses (an artifact of the agent payload shape). Tracked as a future SDK polish item; not blocking for this post. If it lands before publication, re-capture section 4 output.
