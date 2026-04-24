@@ -32,17 +32,17 @@ notes, Gist-embed checklist, and open items.
 =========================================================================
 -->
 
-# Your `agent_events` table is also a test suite. Here's how to wire it into CI.
+# Your Agent Events Table Is Also a Test Suite
 
-*Twenty lines of GitHub Actions YAML, a threshold, and the last 24 hours of production traffic — the minimum agent quality gate, running entirely against the SDK's deterministic code evaluators.*
+*Use BigQuery Agent Analytics, GitHub Actions, and production traces to block latency, token, and quality regressions before they merge.*
 
 ---
 
 ## 1. Hook
 
-*[SCREENSHOT: Slack-style incident thread — "p95 latency spiked 2x after merge #842. Rollback in progress." with two angry reply emoji]*
+*[SCREENSHOT: Slack-style incident thread — "p95 latency spiked 2x after merge #842. Rollback in progress." with two angry reply emoji. Inline image in section 1; cover image is a real GitHub Actions failure (see editorial notes).]*
 
-This is avoidable. Your `agent_events` table already has the data that would have caught it before the merge landed. The gate is 20 lines of CI.
+This is avoidable. Your `agent_events` table already has the data that would have caught it before the merge landed. The gate is one short GitHub Actions workflow.
 
 If you haven't seen your traces as a tree yet, [start here](https://medium.com/google-cloud/your-bigquery-agent-analytics-table-is-a-graph-heres-how-to-see-it-via-sdk-920b4ea14731) — post #1 in this series. This post picks up where that one left off, with a closing line that made a promise:
 
@@ -50,9 +50,16 @@ If you haven't seen your traces as a tree yet, [start here](https://medium.com/g
 
 Time to cash that in.
 
+**By the end, you'll have:**
+
+- A GitHub Actions workflow that gates every PR against yesterday's production traces.
+- Deterministic gates for latency, token usage, tool errors, and turn count.
+- A categorical quality gate for "useful enough" responses.
+- BigQuery cost visibility for every SDK-backed CI run, via a single INFORMATION_SCHEMA pivot.
+
 ## 2. The problem in one paragraph
 
-Golden-set tests catch the shapes you thought to test. Production traffic is bigger, weirder, and moves faster than any golden set you'll ever maintain by hand. You can unit-test your agent's tool signatures all day long and still ship a system-prompt change that pushes p95 token cost up 40% on real sessions. The `agent_events` table already has that ground truth — every tool call, every LLM response, every retry — for every session your agent has served in the last 24 hours. The only missing piece is "compare last 24 hours to the budget, block the merge if it regresses." That piece already exists too.
+Golden-set tests catch the shapes you thought to test. Production traffic is bigger, weirder, and moves faster than any golden set you'll ever maintain by hand. You can unit-test your agent's tool signatures all day long and still ship a system-prompt change that pushes p95 token usage up 40% on real sessions. The `agent_events` table already has that ground truth — every tool call, every LLM response, every retry — for every session your agent has served in the last 24 hours. The only missing piece is "compare last 24 hours to the budget, block the merge if it regresses." That piece already exists too.
 
 ## 3. The SDK is already CI-friendly
 
@@ -101,7 +108,7 @@ Here's a real scenario, pulled from the same Calendar-Assistant demo agent as po
 
 A feature PR changes the agent's system prompt to add more few-shot examples. Locally it looks fine — the golden set of five handcrafted test sessions still passes. What the golden set doesn't cover: *every* real user phrasing. In production traffic, the longer prompt gets repeated on every turn, and multi-turn sessions stack up tokens fast.
 
-Merged. Deployed. Token cost per session goes up 40%.
+Merged. Deployed. Token usage per session goes up 40%.
 
 Here's the workflow YAML that would have caught it:
 
@@ -156,6 +163,8 @@ jobs:
           --project-id=${{ vars.PROJECT_ID }}
           --dataset-id=${{ vars.DATASET_ID }}
 ```
+
+> **If you only copy one thing from this post, copy the workflow above.** Change four values — project ID, dataset ID, agent ID, and the four thresholds — and you have a working gate. [Gist link](TBD: Gist URL for examples/ci/evaluate_thresholds.yml — resolve before publish).
 
 Four thresholds. Each runs as its own step, so when one blows, the PR status tells you *which* gate fired. The `--last=24h` window means you're testing against what your users actually did yesterday, not against what you thought to test last quarter.
 
@@ -293,7 +302,7 @@ CI should be a budget line, not a surprise bill. The `sdk_feature` label gives y
 
 ## 7. Try it
 
-The gate is 20 lines of YAML and the table you already have. Three actions:
+The gate is one short GitHub Actions workflow and the table you already have. Three actions:
 
 1. **[Fork the workflow file](TBD: Gist URL for examples/ci/evaluate_thresholds.yml — resolve before publish)** — drop it into `.github/workflows/` in any agent repo, plug in the four `--threshold` numbers, watch your next PR run the gate.
 2. **Pick your four thresholds from the last 30 days of prod.** Use the sidebar query in section 4 as a starting point.
@@ -320,12 +329,30 @@ Do NOT paste the rest of this file into Medium.
 ## Publication notes
 
 - **Target**: Google Cloud Community (same as post #1). Preserves series continuity and search ranking.
-- **Tags**: `bigquery`, `ai-agents`, `google-cloud`, `python`, `ci-cd` (swap `observability` for `ci-cd` vs post #1).
+- **Tags** (Medium max 5, ordered by reader intent per Medium's tag guidance): `BigQuery`, `AI Agents`, `CI/CD`, `Google Cloud`, `Observability`. Swapped out `python` vs post #1's tag set — this post is much more about CI and production evaluation than Python idiom. If Medium's tag UI suggests `Software Testing` or `DevOps`, consider swapping one of those in for `Observability`.
 - **Code blocks**: four Gist embed candidates flagged inline — pull into Gists on the Google Cloud / SDK-owner account before publication for backlink value.
-- **Callouts**: two blockquote pull-quotes in sections 4 and 7 for skimmers.
-- **Opening image**: exaggerated red/green PR-status UI mashup. Less abstract than post #1's "rows → tree" hero; the value here is visceral (your CI went red on a metric you can actually explain).
+- **Callouts**: three blockquote pull-quotes — the mid-post "copy this first" micro-CTA in section 4, the "production traffic catches the rest" line also in section 4, and the "users did yesterday" close in section 7.
+- **Cover image** (primary feed hero): a real GitHub Actions failure screenshot — the `Token budget` step expanded, red X visible, the `FAIL session=... observed=... budget=...` stderr lines legible. Original, representative, tells the reader in one glance what they're getting. Medium's distribution guidelines explicitly de-rank generic or misleading cover images.
+- **Inline image in section 1**: the Slack-style incident mockup stays as an inline illustration, *not* the cover. It sets up the "this is avoidable" framing without masquerading as the artifact the reader will actually build.
+- **Image alt text and captions**: every image needs both. Treat each caption as a chance to teach something the prose doesn't explicitly say. Draft captions:
+  - Cover / GHA failure: *"The Token budget step fails before merge because 31 sessions exceeded 50k tokens."*
+  - Section 3 stderr screenshot: *"The SDK emits raw observed/budget values on stderr so CI logs are actionable — no scrolling through JSON."*
+  - Section 6 INFORMATION_SCHEMA result: *"Every SDK query carries an `sdk_feature` label, so CI compute cost pivots directly out of INFORMATION_SCHEMA."*
 - **Canonical URL**: set to the Google Cloud dev blog version if co-published, consistent with post #1.
-- **Word count check**: current draft is ~1,650 words before editorial-notes block. Within the 1,400–1,800 target.
+- **Word count check**: current draft is ~1,500 words of prose before editorial-notes block (under 2,000 including code). Within the 1,400–1,800 target.
+
+## Distribution plan (day of publish)
+
+Post the Medium URL the same day to:
+
+- SDK repo — close out issue #77 with a link comment, update the README "news" section if one exists.
+- LinkedIn — lead with the red/green CI screenshot cropped tight. One-line hook: *"We turned yesterday's production agent traces into a GitHub Actions gate. It caught a token regression before merge."*
+- Google Cloud DevRel / Community channels — hand over to the publication editor with the hook above as a reshare suggestion.
+- ADK / agent-observability community threads (Discord, r/LangChain, etc.) — frame as "how we caught a p95 regression at merge time" rather than an SDK-product post.
+
+## Boost nomination
+
+Google Cloud Community editors can nominate posts for Medium's Boost program. Ask the publication owner whether this post is a Boost candidate — the shape (original tooling, non-promotional, concrete CI recipe, reproducible sandbox) fits the criteria Medium publishes for Boost-eligible work. Don't chase Boost at the expense of technical honesty; if the ask feels premature, skip it and let the post earn distribution on its own merits.
 
 ## Series navigation
 
@@ -352,18 +379,19 @@ Shot list (same capture standards as post #1 — light browser / dark terminal /
 
 | # | Location | Content | Capture |
 |---|---|---|---|
-| 1 | Section 1 hook | Slack-style incident thread on a latency regression | Mockup (Figma or a seeded Slack channel the author controls) |
+| **Cover** | Medium hero (not inline in the article) | Real GitHub Actions failure — "Token budget" step expanded, red X, stderr `FAIL session=... observed=... budget=...` lines legible | Real GHA run in `haiyuan-eng-google` or a sandbox repo; fork + run the workflow with the regressed prompt; crop tight to the failing step header + 3–5 FAIL lines |
+| 1 | Section 1 hook, inline | Slack-style incident thread on a latency regression | Mockup (Figma or a seeded Slack channel the author controls). **This is the setup illustration, not the cover.** |
 | 2 | Section 3 | Real terminal showing `evaluate --exit-code` FAIL lines on stderr | Run against sandbox project, capture one real failing run |
-| 3 | Section 4 | GitHub Actions PR status view — 3 green, 1 red, "Token budget" failing | Real GHA run in `haiyuan-eng-google` or a sandbox repo; fork + run the workflow with a deliberately regressed prompt |
-| 4 | Section 6 | INFORMATION_SCHEMA cost-by-feature result | Real BQ console run (follow-on to the gate runs captured in shot #3) |
-| 5 | Closing | Red/green PR-badge stylized graphic | Designer / original artwork |
+| 3 | Section 4 | GitHub Actions PR status view — 3 green, 1 red, "Token budget" failing | Same run that produced the cover; can be a wider/different crop of the same event |
+| 4 | Section 6 | INFORMATION_SCHEMA cost-by-feature result | Real BQ console run (follow-on to the gate runs captured for the cover / shot #3) |
+| 5 | Closing | Red/green PR-badge stylized graphic | Designer / original artwork (secondary priority — a cover + inline screenshots 2/3/4 is enough for publication) |
 
-Exact commands for shot #3 are in the "Companion assets" section below.
+Exact commands for the cover and shot #3 are in the "Companion assets" section below.
 
 ## Companion assets to ship with the post
 
 1. **`examples/ci/evaluate_thresholds.yml`** — commit the workflow file into the SDK repo (`GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK`) under `examples/ci/` so readers can fork it directly. The draft's Gist links to the same content; the in-repo copy is for readers who go straight from the post to the SDK.
-2. **Regressed-branch variant of the Calendar-Assistant demo agent** — pushes p95 token cost up ~40%. Needed for shot #3. Lives in the blog repo alongside `demo_calendar_assistant.py` as `demo_calendar_assistant_regressed.py` or as a feature branch.
+2. **Regressed-branch variant of the Calendar-Assistant demo agent** — pushes p95 token usage up ~40%. Needed for shot #3. Lives in the blog repo alongside `demo_calendar_assistant.py` as `demo_calendar_assistant_regressed.py` or as a feature branch.
 3. **Persistent reference CI run** — public sandbox repo with the workflow installed and enough history that "example failing PR" and "example passing PR" can be linked from the post. Needed to make the "try it" CTA in section 7 concrete.
 
 ## Open items before publish
