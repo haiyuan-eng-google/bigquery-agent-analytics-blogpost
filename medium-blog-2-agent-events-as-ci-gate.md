@@ -59,7 +59,7 @@ Time to cash that in.
 
 ## 2. The problem in one paragraph
 
-Golden-set tests catch the shapes you thought to test. Production traffic is bigger, weirder, and moves faster than any golden set you'll ever maintain by hand. You can unit-test your agent's tool signatures all day long and still ship a system-prompt change that pushes p95 token usage up 40% on real sessions. The `agent_events` table already has that ground truth — every tool call, every LLM response, every retry — for every session your agent has served in the last 24 hours. The only missing piece is "compare last 24 hours to the budget, block the merge if it regresses." That piece already exists too.
+Golden-set tests catch the shapes you thought to test. Production traffic is bigger, weirder, and moves faster than any golden set you'll ever maintain by hand. You can unit-test your agent's tool signatures all day long and still ship a system-prompt change that more than doubles p95 token usage on real sessions. The `agent_events` table already has that ground truth — every tool call, every LLM response, every retry — for every session your agent has served in the last 24 hours. The only missing piece is "compare last 24 hours to the budget, block the merge if it regresses." That piece already exists too.
 
 ## 3. The SDK is already CI-friendly
 
@@ -86,19 +86,21 @@ Three things to know about that command:
 2. **`--exit-code` turns the pass/fail into a process exit code.** Exit 0 means every session stayed within budget; exit 1 means at least one session regressed; exit 2 means configuration error (bad dataset, missing auth, unreadable metrics file). GitHub Actions, Cloud Build, and every other CI runner honor exit codes natively. No extra glue.
 3. **The failure output points at the specific session.** When exit 1 fires, you get one line per failing session on stderr with the raw observed value and the budget it blew through — so the CI log is scannable without scrolling.
 
-Real failure output:
+Real failure output, captured against the sandbox project's last 24 hours:
 
 ```
-{"dataset":"agent_analytics_demo","evaluator_name":"latency_evaluator","total_sessions":127,"passed_sessions":119,"failed_sessions":8,"pass_rate":0.937,...}
+{"dataset":"agent_analytics_demo","evaluator_name":"latency_evaluator","total_sessions":15,"passed_sessions":6,"failed_sessions":9,"pass_rate":0.4,...}
 
---exit-code: 8 session(s) failed (of 127 evaluated)
-  FAIL session=84ef108d metric=latency observed=7420 budget=5000
-  FAIL session=a04c3be1 metric=latency observed=6830 budget=5000
-  FAIL session=b71f8822 metric=latency observed=12310 budget=5000
-  ... 5 more failing session(s) (raise --limit or see --format=json for full list)
+--exit-code: 9 session(s) failed (of 15 evaluated)
+  FAIL session=7effb72f metric=latency observed=5747 budget=5000 score=0 threshold=1
+  FAIL session=4ca31e85 metric=latency observed=6441 budget=5000 score=0 threshold=1
+  FAIL session=1588bdac metric=latency observed=6248 budget=5000 score=0 threshold=1
+  FAIL session=d292f060 metric=latency observed=6918 budget=5000 score=0 threshold=1
+  FAIL session=67e2eeb2 metric=latency observed=5981 budget=5000 score=0 threshold=1
+  ... 4 more failing session(s) (raise --limit or see --format=json for full list)
 ```
 
-Eight sessions in the last 24 hours blew past 5 seconds. Three of them are named on stderr. Copy a session_id into `client.get_session_trace(...).render()` from post #1 and you're inside the failure in ten seconds.
+Nine sessions in the last 24 hours blew past 5 seconds. Five of them are named on stderr. Copy a session_id into `client.get_session_trace(...).render()` from post #1 and you're inside the failure in ten seconds.
 
 *[SCREENSHOT: terminal with that exact output, 8 failing sessions visible, red exit code indicator]*
 
@@ -108,7 +110,7 @@ Here's a real scenario, pulled from the same Calendar-Assistant demo agent as po
 
 A feature PR changes the agent's system prompt to add more few-shot examples. Locally it looks fine — the golden set of five handcrafted test sessions still passes. What the golden set doesn't cover: *every* real user phrasing. In production traffic, the longer prompt gets repeated on every turn, and multi-turn sessions stack up tokens fast.
 
-Merged. Deployed. Token usage per session goes up 40%.
+Merged. Deployed. Per-session token usage more than doubles.
 
 Here's the workflow YAML that would have caught it:
 
@@ -147,7 +149,7 @@ jobs:
           --dataset-id=${{ vars.DATASET_ID }}
       - name: Token budget
         run: >
-          bq-agent-sdk evaluate --evaluator=token_efficiency --threshold=50000
+          bq-agent-sdk evaluate --evaluator=token_efficiency --threshold=5000
           --last=24h --agent-id=calendar_assistant --exit-code
           --project-id=${{ vars.PROJECT_ID }}
           --dataset-id=${{ vars.DATASET_ID }}
@@ -174,13 +176,16 @@ On our regressed PR, the workflow goes red on step "Token budget":
 *[SCREENSHOT: GitHub Actions run view — three green checkmarks, one red X on "Token budget", expanded stderr showing FAIL lines]*
 
 ```
---exit-code: 31 session(s) failed (of 124 evaluated)
-  FAIL session=c1a2fe80 metric=token_efficiency observed=71240 budget=50000
-  FAIL session=d7e99401 metric=token_efficiency observed=68410 budget=50000
-  ...
+--exit-code: 7 session(s) failed (of 15 evaluated)
+  FAIL session=47b2ab47 metric=token_efficiency observed=6724 budget=5000 score=0 threshold=1
+  FAIL session=31a85f0c metric=token_efficiency observed=6691 budget=5000 score=0 threshold=1
+  FAIL session=12f9922c metric=token_efficiency observed=6639 budget=5000 score=0 threshold=1
+  FAIL session=f6abcdd3 metric=token_efficiency observed=6572 budget=5000 score=0 threshold=1
+  FAIL session=78dcf67b metric=token_efficiency observed=6496 budget=5000 score=0 threshold=1
+  ... 2 more failing session(s) (raise --limit or see --format=json for full list)
 ```
 
-Twenty-five percent of sessions went over the 50k token budget. The fix on the original PR: scope the new few-shot block to the ~30% of sessions that actually needed the guidance, not all of them. Push the fix, watch the gate flip green, merge.
+Nearly half of yesterday's sessions went over the 5,000-token budget. Baseline sessions from two days earlier (before the prompt change) averaged 1,900 tokens; yesterday's regressed fleet averages 4,800. The prompt change roughly **2.5x'd** per-session token usage. The fix on the original PR: scope the new few-shot block to the ~30% of sessions that actually needed the guidance, not all of them. Push the fix, watch the gate flip green, merge.
 
 > **Golden-set tests catch what you thought to test. Production traffic catches the rest.**
 
@@ -288,16 +293,18 @@ GROUP BY sdk_feature
 ORDER BY runs DESC;
 ```
 
-Real output against the CI project for one day of PR runs:
+Real output against the sandbox project after a day of evaluate runs and trace pulls:
 
 ```
-sdk_feature,runs,gb_processed,avg_slot_ms
-eval-code,48,0.412,1204
-eval-categorical,12,0.097,4820
-trace-read,6,0.029,1742
++-------------+------+--------------+-------------+
+| sdk_feature | runs | gb_processed | avg_slot_ms |
++-------------+------+--------------+-------------+
+| eval-code   |    7 |          0.0 |       103.0 |
+| trace-read  |    4 |         0.01 |        75.0 |
++-------------+------+--------------+-------------+
 ```
 
-Forty-eight `eval-code` runs across a day of PRs (four evaluators × twelve PRs = 48) cost 412 MB total. Twelve `eval-categorical` runs — the more expensive path because of the model call — cost 97 MB. `trace-read` is developers pulling individual failing sessions with `client.get_session_trace(...).render()` from post #1, straight off the stderr output.
+Seven `eval-code` runs (the four gates from section 4 ran twice, with a couple of ad-hoc local runs on top) read essentially zero bytes — the summary query over 24 hours of this sandbox's `agent_events` is too small for BQ to even round up to 0.01 GB. `trace-read` is me pulling a few of the failing sessions with `client.get_session_trace(...).render()` from post #1, straight off the stderr output; four reads, one cent of a cent. Add a `bq-agent-sdk categorical-eval` step to the workflow and a third `eval-categorical` row appears with a higher `avg_slot_ms` because the model call dominates.
 
 CI should be a budget line, not a surprise bill. The `sdk_feature` label gives you the pivot to keep it that way — when a new feature ships, you'll see its runs appear in this table, and you'll see what it costs before it matters.
 
