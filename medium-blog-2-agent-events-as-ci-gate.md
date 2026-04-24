@@ -165,7 +165,7 @@ jobs:
           --dataset-id=${{ vars.DATASET_ID }}
 ```
 
-> **If you only copy one thing from this post, copy the workflow above.** Change four values — project ID, dataset ID, agent ID, and the four thresholds — and you have a working gate. [Gist link](TBD: Gist URL for examples/ci/evaluate_thresholds.yml — resolve before publish).
+> **If you only copy one thing from this post, copy the workflow above.** Change four values — project ID, dataset ID, agent ID, and the four thresholds — and you have a working gate. [Gist](https://gist.github.com/caohy1988/cd40ef4ffc8a60021654dfcf6a220e75).
 
 Four thresholds. Each runs as its own step, so when one blows, the PR status tells you *which* gate fired. The `--last=24h` window means you're testing against what your users actually did yesterday, not against what you thought to test last quarter.
 
@@ -305,7 +305,7 @@ CI should be a budget line, not a surprise bill. The `sdk_feature` label gives y
 
 The gate is one short GitHub Actions workflow and the table you already have. Three actions:
 
-1. **[Fork the workflow file](TBD: Gist URL for examples/ci/evaluate_thresholds.yml — resolve before publish)** — drop it into `.github/workflows/` in any agent repo, plug in the four `--threshold` numbers, watch your next PR run the gate.
+1. **[Fork the workflow file](https://gist.github.com/caohy1988/cd40ef4ffc8a60021654dfcf6a220e75)** — drop it into `.github/workflows/` in any agent repo, plug in the four `--threshold` numbers, watch your next PR run the gate.
 2. **Pick your four thresholds from the last 30 days of prod.** Use the sidebar query in section 4 as a starting point.
 3. **[Star the SDK repo](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK)** if this made your next release safer.
 
@@ -365,14 +365,34 @@ Cross-links inserted in sections 1, 5, and 7.
 
 ## Gists for embedded code blocks
 
-Four inline code blocks flagged `<!-- Gist embed candidate: ... -->`. Content to pull into Gists:
+Four inline code blocks flagged `<!-- Gist embed candidate: ... -->`.
+
+Draft-review Gists (created under `caohy1988` for PR #17 review; see caveat below):
 
 - `gists/04_evaluate_exit_code_one_liner.sh` — section 3 hero command
+  → https://gist.github.com/caohy1988/25b82ed1bc81d50998693a962a852948
 - `gists/05_evaluate_thresholds_workflow.yml` — section 4 full workflow
-- `gists/06_categorical_eval_metrics_and_gate.md` — section 5 metrics.json + CLI invocation (combined so the reader copies one Gist)
+  → https://gist.github.com/caohy1988/cd40ef4ffc8a60021654dfcf6a220e75
+- `gists/06_categorical_eval_metrics_and_gate.md` — section 5 metrics.json + CLI invocation
+  → https://gist.github.com/caohy1988/27892dd3f8e4a5bf69ffc41e4d29b947
 - `gists/07_information_schema_ci_cost.sql` — section 6 cost query
+  → https://gist.github.com/caohy1988/8ec9178f0a9b152264516ba08d90c37d
 
-Same process as post #1: create on the SDK-owner GitHub account, replace the inline blocks with Medium's Gist embed widget. See `PUBLISH_CHECKLIST.md` section 4 for the detailed workflow.
+**Caveat — Gist ownership before publish.** Post #1's `PUBLISH_CHECKLIST.md`
+section 4 recommends creating Gists under the Google Cloud / SDK-owner
+GitHub account so the "Open in GitHub" backlink points at an authoritative
+source rather than a personal account. The four Gists above are under
+`caohy1988` for PR-review convenience. Before submission to Google Cloud
+Community, either:
+
+- Re-create these four files as Gists under the SDK-owner account and
+  swap the URLs throughout the draft (two spots in section 4 / section 7;
+  plus the per-Gist URLs in this block), OR
+- Confirm with the publication editor that personal-account Gists are
+  acceptable for this series.
+
+Gist 06's inline "add to the workflow" cross-reference points at
+`TBD-workflow-gist`; update it to match whichever URL ships with Gist 05.
 
 ## Screenshots
 
@@ -397,19 +417,46 @@ Exact commands for the cover and shot #3 are in the "Companion assets" section b
 
 ## Open items before publish
 
-1. **SDK v0.2.2 cut and live on PyPI.** The workflow pins
-   `bigquery-agent-analytics>=0.2.2,<0.3.0` — that's the first release that
-   contains the raw-budget `--threshold` semantics (PR #36) and the
-   `categorical-eval --exit-code` flag family (PR #37). Verify the release
-   landed by running `pip install 'bigquery-agent-analytics>=0.2.2'` in a
-   scratch venv and confirming `bq-agent-sdk evaluate --help` lists the new
-   flags before submitting the post. Do **not** publish while the commands
-   demonstrated here aren't reachable via a plain `pip install`.
-2. **Screenshots captured.** Section 3 (real FAIL output), section 4 (GHA red/green), section 6 (INFORMATION_SCHEMA). Shots 1 and 5 are design work.
-3. **Workflow file committed to SDK repo.** `examples/ci/evaluate_thresholds.yml` — fork-and-ship ready. The Gist linked in section 7 should match the SDK-repo copy.
-4. **Persistent reference CI run URL.** Section 7's first CTA currently links to a Gist of the YAML; consider also pointing at a live GHA run history so readers can see a red+green pair they didn't author.
+Done (checked off from earlier rounds):
+
+- [x] SDK v0.2.2 cut and live on PyPI (verified via `pip index versions bigquery-agent-analytics`).
+- [x] Four Gists created (under `caohy1988`; see "Gist ownership" caveat above).
+- [x] Primary CTA URL (section 4 micro-CTA + section 7 fork CTA) point at Gist 05.
+- [x] Regressed-branch Calendar-Assistant variant committed (`demo_calendar_assistant_regressed.py`).
+
+Remaining, ordered by publication readiness:
+
+1. **Regressed-branch fleet produced.** Run
+   `PROJECT_ID=... DATASET_ID=... python demo_calendar_assistant_regressed.py`
+   against the sandbox project enough times to generate a representative fleet
+   of high-token-usage traces in `agent_events`. The script's `main()`
+   already kicks off five prompts per invocation; run it 2–4 times to get
+   20+ sessions worth of regressed traffic.
+2. **Sandbox GitHub repo with the workflow wired up.**
+   - Fork/paste `gists/05_evaluate_thresholds_workflow.yml` into a
+     public repo's `.github/workflows/`.
+   - Add `GCP_SA_KEY` secret (service account with `bigquery.jobUser` +
+     `bigquery.dataViewer` on the sandbox dataset).
+   - Add `PROJECT_ID`, `DATASET_ID` as repo variables.
+   - Run a passing PR (against the baseline demo) and a failing PR
+     (against the regressed demo) so there's a real red+green history
+     to screenshot and link.
+3. **Three real screenshots captured.** Cover (GHA red), section 3 terminal,
+   section 6 BQ console. See the Screenshots table for shot-by-shot guidance.
+4. **Gist ownership decision.** Either re-create the four Gists under
+   the Google Cloud / SDK-owner account and swap URLs throughout the
+   draft, or confirm with the publication editor that personal-account
+   Gists are acceptable for this series.
 5. **DevRel review.** Same reviewer path as post #1.
-6. **Gists created on the Google Cloud / SDK-owner account.** Four code blocks flagged inline.
+6. **Workflow file committed to SDK repo** at
+   `examples/ci/evaluate_thresholds.yml`. Nice-to-have; post is publishable
+   without it as long as the Gist resolves.
 7. **Canonical URL resolved** if co-publishing on the Google Cloud dev blog.
-8. **Primary CTA URL — the Gist for `evaluate_thresholds.yml`.** Section 7 has `TBD:`; resolve to the Gist URL once created.
-9. **Cross-link to post #3 timing.** Section 7 references a future post in the series. Confirm timing with the #51 cadence before publishing — if post #3 is more than 4 weeks out, soften the forward-reference to "a later post" rather than "post #3."
+8. **Cross-link to post #3 timing.** Section 7 references a future post in the
+   series. Confirm timing with the #51 cadence before publishing — if post #3
+   is more than 4 weeks out, soften the forward-reference to "a later post"
+   rather than "post #3."
+9. **At Medium paste time**: strip both `EDITORIAL NOTES — NOT PUBLISHABLE`
+   blocks, add tags (`BigQuery`, `AI Agents`, `CI/CD`, `Google Cloud`,
+   `Observability`), set canonical URL, replace inline code blocks with
+   Medium's Gist embed widget for the four Gist URLs.

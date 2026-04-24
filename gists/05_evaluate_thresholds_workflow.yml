@@ -1,0 +1,67 @@
+# .github/workflows/evaluate_thresholds.yml
+#
+# Section 4 reference workflow from Medium post #2:
+# "Your Agent Events Table Is Also a Test Suite"
+#
+# Four deterministic gates run against the last 24 hours of
+# production traces every time a PR touches agent code or prompts.
+# Each gate is its own step so a red status tells you which budget
+# regressed.
+#
+# Requires bigquery-agent-analytics >= 0.2.2 (raw-budget --threshold
+# semantics and tight --exit-code failure output).
+#
+# Fork this file and change four things:
+#   - vars.PROJECT_ID          — your GCP project
+#   - vars.DATASET_ID          — the BigQuery dataset with your agent_events
+#   - the --agent-id values    — your agent's name
+#   - the four --threshold numbers (see the "how to pick thresholds"
+#                                   sidebar in post #2)
+
+name: Agent quality gate
+
+on:
+  pull_request:
+    paths:
+      - 'agents/**'
+      - 'prompts/**'
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      # Pin to the first release with the raw-budget --threshold
+      # semantics, the tight --exit-code failure output, and the
+      # categorical-eval gate flags. Releases before 0.2.2 shipped a
+      # normalized score + 0.5 cutoff, which fires every gate at
+      # roughly half the budget you typed.
+      - run: pip install 'bigquery-agent-analytics>=0.2.2,<0.3.0'
+      - uses: google-github-actions/auth@v2
+        with: { credentials_json: '${{ secrets.GCP_SA_KEY }}' }
+      - name: Latency budget
+        run: >
+          bq-agent-sdk evaluate --evaluator=latency --threshold=5000
+          --last=24h --agent-id=calendar_assistant --exit-code
+          --project-id=${{ vars.PROJECT_ID }}
+          --dataset-id=${{ vars.DATASET_ID }}
+      - name: Token budget
+        run: >
+          bq-agent-sdk evaluate --evaluator=token_efficiency --threshold=50000
+          --last=24h --agent-id=calendar_assistant --exit-code
+          --project-id=${{ vars.PROJECT_ID }}
+          --dataset-id=${{ vars.DATASET_ID }}
+      - name: Tool error rate
+        run: >
+          bq-agent-sdk evaluate --evaluator=error_rate --threshold=0.1
+          --last=24h --agent-id=calendar_assistant --exit-code
+          --project-id=${{ vars.PROJECT_ID }}
+          --dataset-id=${{ vars.DATASET_ID }}
+      - name: Turn count
+        run: >
+          bq-agent-sdk evaluate --evaluator=turn_count --threshold=10
+          --last=24h --agent-id=calendar_assistant --exit-code
+          --project-id=${{ vars.PROJECT_ID }}
+          --dataset-id=${{ vars.DATASET_ID }}
