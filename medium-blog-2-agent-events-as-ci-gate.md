@@ -132,10 +132,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       # Pin to the first release with the raw-budget --threshold
-      # semantics and the tight --exit-code failure output. Older
-      # 0.2.x versions shipped a normalized score + 0.5 cutoff, which
-      # effectively fires every gate at roughly half the budget.
-      - run: pip install 'bigquery-agent-analytics>=0.3.0,<0.4.0'
+      # semantics, the tight --exit-code failure output, and the
+      # categorical-eval gate flags. Releases before 0.2.2 shipped a
+      # normalized score + 0.5 cutoff, which fires every gate at
+      # roughly half the budget you typed.
+      - run: pip install 'bigquery-agent-analytics>=0.2.2,<0.3.0'
       - uses: google-github-actions/auth@v2
         with: { credentials_json: '${{ secrets.GCP_SA_KEY }}' }
       - name: Latency budget
@@ -396,13 +397,14 @@ Exact commands for the cover and shot #3 are in the "Companion assets" section b
 
 ## Open items before publish
 
-1. **SDK release with PR #36 + #37 behavior is live on PyPI.** The workflow pins
-   `bigquery-agent-analytics>=0.3.0,<0.4.0` — that's the first release that
-   contains the raw-budget `--threshold` semantics and the `categorical-eval
-   --exit-code` flag family the draft demos. Confirm the actual version number
-   at release time and update the pin + any accompanying prose if it ships as
-   `0.2.2`, `0.3.1`, etc. instead of `0.3.0`. Do **not** publish while the
-   commands demonstrated here aren't reachable via a plain `pip install`.
+1. **SDK v0.2.2 cut and live on PyPI.** The workflow pins
+   `bigquery-agent-analytics>=0.2.2,<0.3.0` — that's the first release that
+   contains the raw-budget `--threshold` semantics (PR #36) and the
+   `categorical-eval --exit-code` flag family (PR #37). Verify the release
+   landed by running `pip install 'bigquery-agent-analytics>=0.2.2'` in a
+   scratch venv and confirming `bq-agent-sdk evaluate --help` lists the new
+   flags before submitting the post. Do **not** publish while the commands
+   demonstrated here aren't reachable via a plain `pip install`.
 2. **Screenshots captured.** Section 3 (real FAIL output), section 4 (GHA red/green), section 6 (INFORMATION_SCHEMA). Shots 1 and 5 are design work.
 3. **Workflow file committed to SDK repo.** `examples/ci/evaluate_thresholds.yml` — fork-and-ship ready. The Gist linked in section 7 should match the SDK-repo copy.
 4. **Persistent reference CI run URL.** Section 7's first CTA currently links to a Gist of the YAML; consider also pointing at a live GHA run history so readers can see a red+green pair they didn't author.
