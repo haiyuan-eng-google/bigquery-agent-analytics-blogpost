@@ -10,7 +10,7 @@ came from that run (workflow run id 25021548083 on caohy1988/bqaa-ci-sandbox#3).
 
 Companion posts:
   Post #1: https://medium.com/google-cloud/your-bigquery-agent-analytics-table-is-a-graph-heres-how-to-see-it-via-sdk-920b4ea14731
-  Post #2: in DevRel review (PR #17 in this repo)
+  Post #2 (live): https://medium.com/google-cloud/your-agent-events-table-is-also-a-test-suite-999fbef885ed
 
 This is post #3 in the series tracked at
 https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK/issues/82.
@@ -44,9 +44,9 @@ checklist (screenshots, Gists, DevRel review, tags).
 
 Imagine your agent's CI is fully green. Latency budget: passed. Token budget: passed. Tool errors: zero. Turn count: under cap. You merge. The next morning a user reports the agent confidently told them their meeting was booked with *"Jordan Lee (Design)"* — except Jordan Lee is in Platform, and the meeting never made it onto the calendar.
 
-The deterministic gate from <!-- TBD: replace with post #2 published URL before publication --> [post #2 in this series][post-2] caught nothing. It couldn't. *"The agent invented a detail"* is not a budget you can put a number on.
+The deterministic gate from [post #2 in this series][post-2] caught nothing. It couldn't. *"The agent invented a detail"* is not a budget you can put a number on.
 
-[post-2]: https://github.com/haiyuan-eng-google/bigquery-agent-analytics-blogpost/pull/17
+[post-2]: https://medium.com/google-cloud/your-agent-events-table-is-also-a-test-suite-999fbef885ed
 
 That's the gap. This post fills it with one workflow step.
 
@@ -197,8 +197,6 @@ Two-step CTA:
 
 If you haven't seen the deterministic gate yet, post #2 is [*Your Agent Events Table Is Also a Test Suite*][post-2]. Same SDK, complementary gate: post #2 turns rows into a budget gate; this post turns the same rows into a semantic gate.
 
-<!-- TBD: Replace [post-2] reference link target (defined near the top of section 1) with the post #2 published Medium URL before submitting to the publication. -->
-
 
 ---
 
@@ -264,7 +262,7 @@ Same process as posts #1 and #2: create on the SDK-owner GitHub account before p
 4. **DevRel review.** Same path as posts #1 and #2.
 5. **Strip both `EDITORIAL NOTES — NOT PUBLISHABLE` blocks** before pasting to Medium.
 6. **Tags + canonical URL** at submission time.
-7. **Cross-check post #2 publication status.** This post forward-references post #2; if post #2 is still in DevRel review at the time post #3 is ready, hold post #3 until post #2 is live so the reader can follow the series.
+7. ~~Cross-check post #2 publication status.~~ Post #2 is live: https://medium.com/google-cloud/your-agent-events-table-is-also-a-test-suite-999fbef885ed — the in-body `[post-2]` reference link already points at it.
 
 ## Distribution plan (day of publish)
 
@@ -282,6 +280,6 @@ Same shape as post #2: ask the Google Cloud Community editor whether this post f
 - Series plan: https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK/issues/51
 - Post #3 plan + maintainer thread: https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK/issues/82
 - Post #1 published: https://medium.com/google-cloud/your-bigquery-agent-analytics-table-is-a-graph-heres-how-to-see-it-via-sdk-920b4ea14731
-- Post #2 draft: PR #17 in this repo
+- Post #2 published: https://medium.com/google-cloud/your-agent-events-table-is-also-a-test-suite-999fbef885ed
 - SDK release with the live-verified AI.GENERATE judge path: 0.2.3 on PyPI (2026-04-27)
 - Quote-escape polish for FAIL lines (cosmetic): GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK#84
