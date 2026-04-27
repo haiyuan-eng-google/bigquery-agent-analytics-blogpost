@@ -44,7 +44,9 @@ checklist (screenshots, Gists, DevRel review, tags).
 
 Imagine your agent's CI is fully green. Latency budget: passed. Token budget: passed. Tool errors: zero. Turn count: under cap. You merge. The next morning a user reports the agent confidently told them their meeting was booked with *"Jordan Lee (Design)"* — except Jordan Lee is in Platform, and the meeting never made it onto the calendar.
 
-The deterministic gate from [post #2 in this series](https://github.com/haiyuan-eng-google/bigquery-agent-analytics-blogpost/pull/17) caught nothing. It couldn't. *"The agent invented a detail"* is not a budget you can put a number on.
+The deterministic gate from <!-- TBD: replace with post #2 published URL before publication --> [post #2 in this series][post-2] caught nothing. It couldn't. *"The agent invented a detail"* is not a budget you can put a number on.
+
+[post-2]: https://github.com/haiyuan-eng-google/bigquery-agent-analytics-blogpost/pull/17
 
 That's the gap. This post fills it with one workflow step.
 
@@ -79,13 +81,13 @@ bq-agent-sdk evaluate \
 
 Three things to know:
 
-1. **`AI.GENERATE` keeps evaluation in BigQuery.** The judge runs as a single SQL job — your trace data doesn't leave the warehouse. When AI.GENERATE isn't available (no project access, no model access), the SDK falls back to direct Gemini API calls via `google-genai`. `report.details["execution_mode"]` says which path actually ran (`ai_generate`, `ml_generate_text`, or `api_fallback`) so your CI logs are auditable.
+1. **`AI.GENERATE` issues the model call from BigQuery SQL.** The judge runs as a single BigQuery job — no app-side export, no custom judge service in the middle. (Inference itself is Vertex AI-backed; see section 6 for how the BQ side and the AI Platform side bill separately.) When AI.GENERATE isn't available (no project access, wrong region, missing permissions), the SDK falls back to direct Gemini API calls via `google-genai`. `report.details["execution_mode"]` says which path actually ran (`ai_generate`, `ml_generate_text`, or `api_fallback`) so your CI logs are auditable.
 2. **`--exit-code` is the same gate post #2 used.** Exit 0 means every session passed the threshold; exit 1 means at least one failed; exit 2 means configuration error. Your existing GitHub Actions / Cloud Build wiring honors it.
 3. **Failure output explains itself.** When the gate fails, each FAIL line carries the session id, the metric, the score, and a bounded `feedback="..."` snippet drawn from the judge's justification. The screenshot the post leads with isn't a vibe score; it's the model telling you exactly what it caught.
 
 ## 4. The demo — semantic gate catches what budgets can't
 
-Real run, captured today against the same Calendar-Assistant demo from posts #1 and #2. The agent's prompt was tweaked to be more "decisive" — confirm bookings, propose times, fill in plausible team names. Locally it looks great. The deterministic gate's response: green across the board.
+Real run, captured today against the same Calendar-Assistant demo from posts #1 and #2. The agent's prompt was tweaked to be more "decisive" — confirm bookings, propose times, fill in plausible team names. The deterministic budgets from post #2 wouldn't have caught this regression: the agent's responses are within latency, token, and turn budgets, and there are no tool errors. In the run below the deterministic steps appear greyed out because the semantic gate runs first and ends the job on its first failure; for this PR the *kind* of regression the budgets check for never came up.
 
 Here's what `AI.GENERATE` returns when you ask it whether the agent's claims are supported by the trace:
 
@@ -93,30 +95,31 @@ Here's what `AI.GENERATE` returns when you ask it whether the agent's claims are
 
 ```
 --exit-code: 10 session(s) failed (of 10 evaluated)
-  FAIL session=1e4e8bf0 metric=faithfulness score=0.1
-        feedback="The agent claims to have 'found Jordan Lee (Design)'
-                  and mentions a 'default 30-minute duration', but
-                  no tool results o…"
-  FAIL session=a6239c27 metric=faithfulness score=0.3
-        feedback="The agent hallucinates a specific start date for
-                  'next week' (May 18) which is not present in the
-                  conversation context…"
-  FAIL session=33c1e74d metric=faithfulness score=0.3
-        feedback="The agent specifies 'Jordan Lee (Design)' and
-                  'April 28' without any tool output or context in
-                  the trace to support the…"
-  ... (7 more failing session(s))
+  FAIL session=69959b42 (no per-metric detail available)
+  FAIL session=c7a8eb41 metric=faithfulness score=0.1
+        feedback="The agent claims to have 'found three people named
+                  Priya' with specific names and departments, but no
+                  tool results or c…"
+  FAIL session=a6239c27 (no per-metric detail available)
+  FAIL session=33c1e74d (no per-metric detail available)
+  FAIL session=1e4e8bf0 (no per-metric detail available)
+  FAIL session=27f933e5 (no per-metric detail available)
+  FAIL session=b1ead1c2 (no per-metric detail available)
+  FAIL session=b5ace52c (no per-metric detail available)
+  FAIL session=a4e633d0 metric=faithfulness score=0.1
+        feedback="The agent claims to have found 'Priya Patel
+                  (Platform)' but no tool results or context are
+                  provided in the trace to sup…"
+  FAIL session=e63babbd (no per-metric detail available)
 ```
 
 Three things worth pausing on:
 
-- **The judge cites the trace.** "*Jordan Lee (Design)*" — the agent confidently asserts a team. The tool output never said that. The judge spots it.
-- **Scores cluster low.** 0.1 and 0.3 mean the model is confident about the failure, not split. Tune your threshold above what the model considers a passing answer; here 0.7 gives clean separation.
-- **The same fleet passed correctness (3/3 at scores 0.9–1.0).** The agent's *answers* are fine. It's the *grounding* that's broken. That's the regression you can't put a budget on, and that's why faithfulness is the sharper judge for this trace data.
+- **The judge cites the trace.** *"Priya Patel (Platform)"*, *"three people named Priya"* — the agent confidently asserts specific names and departments. The tool output never said any of that. The judge spots it.
+- **Scored sessions come back at 0.1, well under the 0.7 threshold.** The model isn't split on these; it's sharply confident the agent fabricated specifics. Tune your threshold above what your judge considers a passing answer.
+- **The other eight rows are `(no per-metric detail available)`.** Those are sessions where AI.GENERATE returned an empty score for that row — the regressed agent's responses didn't fit the judge's structured-output schema cleanly. Empty scores fail any non-zero threshold, so the gate still fires red on them. If a dashboard needs to tell *empty-score* failures apart from *low-score* failures, add `--strict` and the SDK stamps `details["parse_error"]=True` plus a report-level `parse_errors` counter. For pass/fail-only CI, `--strict` is a no-op.
 
 > **If you only copy one thing from this post, copy that one workflow step.** Add it to the gate from post #2 with `--evaluator=llm-judge --criterion=hallucination --threshold=0.7 --exit-code` and your next merge against unsupported claims goes red. [Gist](TBD: Gist URL for llm_judge_hallucination.sh — resolve before publish).
-
-The PR's deterministic gates? They're greyed out in the run view. The Hallucination step ran first, returned exit 1, and GHA stopped before Token budget / Latency / Tool error / Turn count had a chance. That's deliberate — once the semantic gate fires, the rest of the run is moot until someone fixes the prompt. (You can reorder steps if you want different priorities.)
 
 > **Latency you can measure. Hallucination you have to score.**
 
@@ -143,11 +146,15 @@ The same workflow step extends to two more judges with frozen prompts:
        --criterion=sentiment --threshold=0.6 ...
 ```
 
-Each gets its own threshold; each shows up as its own row in the CI log. On the same fleet that fails hallucination 10/10, **correctness passes 3/3** at 0.9–1.0 (the agent does what it's asked given what tools returned), and **sentiment passes 3/3** at 0.8–0.9 (the tone is helpful). That's the value of stacking: each judge answers a different question, and the right combination depends on what your agent does. A booking agent cares about faithfulness more than tone. A support bot might be the inverse.
+Each gets its own threshold; each shows up as its own row in the CI log. To pick the right combination for your agent, run all three locally against a slice of recent traffic before wiring them into CI. Against a three-session slice of the same trace data this post's CI run scored, run separately, the picture splits cleanly:
+
+- **Correctness** scored the slice 0.9–1.0 (3/3 pass at threshold 0.7). The agent *does what it's asked given what its tools returned*.
+- **Sentiment** scored the slice 0.8–0.9 (3/3 pass at threshold 0.6). Helpful tone.
+- **Hallucination/faithfulness** scored the slice 0.1–0.3 (0/3 pass). Same agent, same data — the *grounding* is what's broken.
+
+That's why faithfulness is the sharper judge for this trace data, and why a booking agent should care about it more than tone. A support bot or a copywriting assistant might invert the priority.
 
 A short compare/contrast vs. post #2's `categorical-eval`: `LLMAsJudge` produces *continuous* scores (0.0–1.0), good for thresholded gates and tracking distributions over time. `categorical-eval` produces *discrete* one-of-N classifications, good for pass-rate gates over named categories. Use both in the same workflow when both shapes apply.
-
-One small aside on the FAIL output above: a few of the 10 failing sessions appeared as `FAIL session=… (no per-metric detail available)` instead of carrying a `feedback="…"` snippet. That's the safety-net branch firing when AI.GENERATE returned a session with an empty `score` (no parseable judge output for that row). Those sessions still count as failed — empty `scores` falls below any non-zero threshold. If you want to tell them apart from low-score failures in a dashboard or post-incident triage, add `--strict`, which stamps `details["parse_error"]=True` and emits a report-level `parse_errors` counter. For pass/fail-only CI gates, `--strict` is a no-op; reach for it when the question is *which kind* of failure, not whether it failed.
 
 ## 6. What the plugin labels show over time
 
@@ -188,7 +195,10 @@ Two-step CTA:
 
 > **Your CI shouldn't only check what you wrote. It should check whether the agent stays grounded in what your tools said.**
 
-If you haven't seen the deterministic gate yet, post #2 is [*Your Agent Events Table Is Also a Test Suite*](https://github.com/haiyuan-eng-google/bigquery-agent-analytics-blogpost/pull/17). Same SDK, complementary gate: post #2 turns rows into a budget gate; this post turns the same rows into a semantic gate.
+If you haven't seen the deterministic gate yet, post #2 is [*Your Agent Events Table Is Also a Test Suite*][post-2]. Same SDK, complementary gate: post #2 turns rows into a budget gate; this post turns the same rows into a semantic gate.
+
+<!-- TBD: Replace [post-2] reference link target (defined near the top of section 1) with the post #2 published Medium URL before submitting to the publication. -->
+
 
 ---
 
