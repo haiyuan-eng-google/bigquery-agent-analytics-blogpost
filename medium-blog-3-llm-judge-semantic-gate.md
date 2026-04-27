@@ -83,7 +83,7 @@ Three things to know:
 
 1. **`AI.GENERATE` issues the model call from BigQuery SQL.** The judge runs as a single BigQuery job — no app-side export, no custom judge service in the middle. (Inference itself is Vertex AI-backed; see section 6 for how the BQ side and the AI Platform side bill separately.) When AI.GENERATE isn't available (no project access, wrong region, missing permissions), the SDK falls back to direct Gemini API calls via `google-genai`. `report.details["execution_mode"]` says which path actually ran (`ai_generate`, `ml_generate_text`, or `api_fallback`) so your CI logs are auditable.
 2. **`--exit-code` is the same gate post #2 used.** Exit 0 means every session passed the threshold; exit 1 means at least one failed; exit 2 means configuration error. Your existing GitHub Actions / Cloud Build wiring honors it.
-3. **Failure output explains itself.** When the gate fails, each FAIL line carries the session id, the metric, the score, and a bounded `feedback="..."` snippet drawn from the judge's justification. The screenshot the post leads with isn't a vibe score; it's the model telling you exactly what it caught.
+3. **Failure output explains itself when the judge gives a parseable score.** When the gate fails, scored FAIL lines carry the session id, the metric, the score, and a bounded `feedback="..."` snippet drawn from the judge's justification — the model telling you exactly what it caught. Sessions where AI.GENERATE didn't return a parseable score still show up as `FAIL session=… (no per-metric detail available)` and still count as failures (more on those in section 4).
 
 ## 4. The demo — semantic gate catches what budgets can't
 
@@ -190,7 +190,7 @@ One gotcha: AI.GENERATE jobs *do* show up in INFORMATION_SCHEMA, but Vertex AI i
 
 Two-step CTA:
 
-1. **Add one step to your post-#2 workflow** with `--evaluator=llm-judge --criterion=hallucination --threshold=0.7 --strict --exit-code`. The Gist includes the full step. Run it against your last 24 hours of traces; tune the threshold once you've seen the score distribution your agent actually produces.
+1. **Add one step to your post-#2 workflow** with `--evaluator=llm-judge --criterion=hallucination --threshold=0.7 --exit-code` (the same shape used in section 3 and section 4). Run it against your last 24 hours of traces; tune the threshold once you've seen the score distribution your agent actually produces. Add `--strict` later if you want a dashboard to tell empty-score failures apart from low-score ones — the gate exits red the same way either way.
 2. **If you don't have AI.GENERATE access** in your project — wrong region, missing model permissions — install `bigquery-agent-analytics[improvement]` and the SDK uses the Gemini API fallback path automatically. Same scores, different mechanics.
 
 > **Your CI shouldn't only check what you wrote. It should check whether the agent stays grounded in what your tools said.**
