@@ -1,0 +1,42 @@
+# Excerpt from .github/workflows/evaluate_thresholds.yml
+#
+# Companion to Medium post #3, section 5 — "stack judges, don't
+# pick one." Each judge gets its own threshold; each shows up as
+# its own row in the CI log. To keep the post-#2 deterministic
+# budgets (latency, token, error_rate, turn_count) running ahead
+# of these semantic steps, paste this block after them in your
+# existing workflow file.
+#
+# Requires bigquery-agent-analytics >= 0.2.3.
+#
+# A booking-style agent typically cares most about
+# *hallucination* (did the model invent details the tools never
+# returned?). A support / Q&A agent might care most about
+# *correctness*. A user-facing assistant tends to care about
+# *sentiment*. Run all three locally against a slice of recent
+# traffic before deciding which to gate CI on; you don't need
+# every judge in production.
+
+- name: Hallucination judge
+  run: >
+    bq-agent-sdk evaluate --evaluator=llm-judge
+    --criterion=hallucination --threshold=0.7
+    --last=24h --agent-id=calendar_assistant --exit-code
+    --project-id=${{ vars.PROJECT_ID }}
+    --dataset-id=${{ vars.DATASET_ID }}
+
+- name: Correctness judge
+  run: >
+    bq-agent-sdk evaluate --evaluator=llm-judge
+    --criterion=correctness --threshold=0.7
+    --last=24h --agent-id=calendar_assistant --exit-code
+    --project-id=${{ vars.PROJECT_ID }}
+    --dataset-id=${{ vars.DATASET_ID }}
+
+- name: Sentiment judge
+  run: >
+    bq-agent-sdk evaluate --evaluator=llm-judge
+    --criterion=sentiment --threshold=0.6
+    --last=24h --agent-id=calendar_assistant --exit-code
+    --project-id=${{ vars.PROJECT_ID }}
+    --dataset-id=${{ vars.DATASET_ID }}
